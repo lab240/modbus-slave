@@ -245,6 +245,33 @@ file /tmp/cpu.dat is stale (45s > 10s), returning zeros
 
 ---
 
+## Платы NAPI
+
+Проект разработан командой [NAPI Lab](https://github.com/napilab) и в первую очередь  
+тестируется на **промышленных одноплатных компьютерах NAPI** на базе Rockchip SoC.
+
+[![NAPI Boards](https://img.shields.io/badge/NAPI-промышленные%20SBC-blue)](https://github.com/napilab/napi-boards)
+
+Если вы ищете надёжную аппаратную платформу для запуска `modbus_slave` в production —  
+посмотрите линейку плат NAPI:
+
+👉 **[github.com/napilab/napi-boards](https://github.com/napilab/napi-boards)**
+
+- **NAPI2** — RK3568J, RS-485 на борту, Armbian
+- **NAPI-C** — RK3308, компактный, промышленного класса
+
+---
+
+## Авторы
+
+**Dmitrii Novikov** ([@dmnovikov](https://github.com/dmnovikov))  
+[NAPI Lab](https://github.com/napilab)
+
+**Claude** (Anthropic)  
+ИИ-ассистент и соавтор — архитектура, код, документация
+
+---
+
 ## Лицензия
 
 MIT

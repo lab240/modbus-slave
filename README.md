@@ -244,6 +244,33 @@ Disable with `-t 0` if you update files infrequently.
 
 ---
 
+## NAPI boards
+
+This project is developed and maintained by the [NAPI Lab](https://github.com/napilab) team  
+and is primarily tested on **NAPI industrial single-board computers** based on Rockchip SoCs.
+
+[![NAPI Boards](https://img.shields.io/badge/NAPI-industrial%20SBC-blue)](https://github.com/napilab/napi-boards)
+
+If you are looking for a reliable hardware platform to run `modbus_slave` in production,  
+check out the NAPI board lineup:
+
+👉 **[github.com/napilab/napi-boards](https://github.com/napilab/napi-boards)**
+
+- **NAPI2** — RK3568J, RS-485 onboard, Armbian
+- **NAPI-C** — RK3308, compact, industrial grade
+
+---
+
+## Authors
+
+**Dmitrii Novikov** ([@dmnovikov](https://github.com/dmnovikov))  
+[NAPI Lab](https://github.com/napilab)
+
+**Claude** (Anthropic)  
+AI assistant and co-author — architecture, code, documentation
+
+---
+
 ## License
 
 MIT
