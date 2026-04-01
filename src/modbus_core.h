@@ -131,26 +131,69 @@ static inline int parse_mode(const char *s, int *databits, char *parity, int *st
 /* ═══════════════════════════════════════════════════════════════════════
  * print_stats() — Log traffic statistics
  *
- * Prints one summary line always; per-slave detail only for slaves with
- * errors. Called periodically from the main loop and once on shutdown.
+ * Shows per-slave activity since the last call (delta counters), with
+ * timestamp, source type (file/random), and error breakdown.
+ * Silent slaves (zero requests in the interval) are skipped to reduce noise.
+ * Called periodically from the main loop and once on clean shutdown.
  * ═══════════════════════════════════════════════════════════════════════ */
 static inline void print_stats(void)
 {
-    unsigned long total_ok = 0, total_err = 0;
+    /* Snapshot of previous counters for delta calculation */
+    static slave_stat_t prev[MAX_SLAVES + 1];
+    static int first_call = 1;
+
+    /* Format current timestamp */
+    char ts[32];
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    if (tm_info)
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm_info);
+    else
+        snprintf(ts, sizeof(ts), "-");
+
+    /* Calculate totals for summary line */
+    unsigned long total_ok  = 0, total_err = 0;
+    unsigned long delta_ok  = 0, delta_err = 0;
     for (int i = 1; i <= g_num_slaves; i++) {
         total_ok  += g_stat[i].ok;
         total_err += g_stat[i].err_crc + g_stat[i].err_addr + g_stat[i].err_fc;
+        delta_ok  += g_stat[i].ok  - prev[i].ok;
+        delta_err += (g_stat[i].err_crc  - prev[i].err_crc)
+                   + (g_stat[i].err_addr - prev[i].err_addr)
+                   + (g_stat[i].err_fc   - prev[i].err_fc);
     }
-    LOG_I("stats: slaves=%d total_ok=%lu total_err=%lu",
-          g_num_slaves, total_ok, total_err);
 
+    LOG_I("[%s] stats: slaves=%d  interval_ok=%lu interval_err=%lu  total_ok=%lu total_err=%lu",
+          ts, g_num_slaves, delta_ok, delta_err, total_ok, total_err);
+
+    /* Per-slave detail — only slaves that had activity in this interval */
     for (int i = 1; i <= g_num_slaves; i++) {
-        slave_stat_t *s = &g_stat[i];
-        unsigned long err = s->err_crc + s->err_addr + s->err_fc;
-        if (err > 0)
-            LOG_I("  id=%d ok=%lu crc_err=%lu addr_err=%lu fc_err=%lu",
-                  i, s->ok, s->err_crc, s->err_addr, s->err_fc);
+        unsigned long d_ok   = g_stat[i].ok        - prev[i].ok;
+        unsigned long d_crc  = g_stat[i].err_crc   - prev[i].err_crc;
+        unsigned long d_addr = g_stat[i].err_addr  - prev[i].err_addr;
+        unsigned long d_fc   = g_stat[i].err_fc    - prev[i].err_fc;
+        unsigned long d_err  = d_crc + d_addr + d_fc;
+
+        /* Skip silent slaves unless first call or there are errors */
+        if (!first_call && d_ok == 0 && d_err == 0) continue;
+
+        const char *src = g_regs_file[i] ? "file" : "random";
+
+        if (d_err == 0)
+            LOG_I("  id=%-2d  ok=%-6lu  src=%s%s",
+                  i, d_ok, src,
+                  g_regs_file[i] ? g_regs_file[i] : "");
+        else
+            LOG_I("  id=%-2d  ok=%-6lu  src=%s%s  ERRORS: crc=%lu addr=%lu fc=%lu",
+                  i, d_ok, src,
+                  g_regs_file[i] ? g_regs_file[i] : "",
+                  d_crc, d_addr, d_fc);
     }
+
+    /* Save current counters as baseline for next interval */
+    for (int i = 1; i <= g_num_slaves; i++)
+        prev[i] = g_stat[i];
+    first_call = 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

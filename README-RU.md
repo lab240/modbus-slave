@@ -129,31 +129,82 @@ move /Y C:\temp\s1.tmp C:\temp\s1.dat
 
 ## Примеры
 
-### Linux — 5 устройств, два с реальными данными
+### 1. Простейший — один датчик, случайные значения
 ```bash
+# сервер
+./modbus_slave -p /dev/ttyUSB0 -b 115200
+
+# клиент
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 /dev/ttyUSB0
+```
+
+### 2. Пять датчиков, все случайные (ID 1..5)
+```bash
+# сервер
+./modbus_slave -p /dev/ttyUSB0 -b 115200 -a 5
+
+# клиент — опрос датчика с ID 3
+mbpoll -m rtu -b 115200 -P none -a 3 -r 1 -c 20 /dev/ttyUSB0
+```
+
+### 3. Два датчика с реальными данными, остальные случайные
+```bash
+# сервер — датчики 1,2 из файлов; датчики 3,4,5 случайные
 ./modbus_slave -p /dev/ttyUSB0 -b 115200 -a 5 \
     -f 1:/tmp/cpu.dat \
     -f 2:/tmp/time.dat
-# устройства 3, 4, 5 → случайные значения
+
+# клиент
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 /dev/ttyUSB0
 ```
 
-### Linux — демон на NAPI2
+### 4. NAPI2 — RS-485, режим демона
 ```bash
+# сервер
 ./modbus_slave -d -p /dev/ttyS7 -b 115200 -a 10 \
     -f 1:/tmp/cpu.dat \
     -t 15
+
+# клиент (с PC через RS-485 адаптер)
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 /dev/ttyUSB0
+
+# логи
+journalctl -t modbus_slave -f
 ```
 
-### Windows — 3 устройства
+### 5. Windows — 3 датчика
 ```cmd
+# сервер
 modbus_slave.exe -p COM4 -b 115200 -a 3 -f 1:C:\temp\s1.dat -f 2:C:\temp\s2.dat
+
+# клиент
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 COM4
 ```
 
-### Windows — фоновый режим
+### 6. Windows — фоновый режим
 ```cmd
 modbus_slave.exe -bg -p COM4 -b 115200 -a 3 -f 1:C:\temp\s1.dat
 modbus_slave.exe -s
 modbus_slave.exe -k
+```
+
+---
+
+## Формат лога
+
+Статистика выводится каждые 60 секунд с меткой времени, счётчиком за интервал
+и разбивкой по каждому датчику с указанием источника данных:
+
+```
+[2026-03-31 14:25:00] stats: slaves=3  interval_ok=180 interval_err=0  total_ok=3600 total_err=0
+  id=1   ok=60     src=file/tmp/cpu.dat
+  id=2   ok=60     src=file/tmp/time.dat
+  id=3   ok=60     src=random
+```
+
+Если файл регистров устарел (не обновлялся дольше `-t` секунд):
+```
+file /tmp/cpu.dat is stale (45s > 10s), returning zeros
 ```
 
 ---

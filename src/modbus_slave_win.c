@@ -315,36 +315,81 @@ static void go_background(int argc, char *argv[])
 /* ── Usage / help ────────────────────────────────────────────────────── */
 static void usage(const char *p)
 {
-    fprintf(stderr,
-        "Modbus RTU slave emulator — simulate up to %d devices on one port\n\n"
+    fprintf(stdout,
+        "modbus_slave — Modbus RTU Slave Emulator\n"
+        "Simulates up to %d independent slave devices on one serial port.\n"
+        "Each slave responds to FC03 with %d holding registers.\n"
+        "\n"
         "Usage:\n"
-        "  %s -p <port> -b <baud> [-a <n>] [-o <mode>] [-f <id>:<file>] [-t <sec>] [-bg]\n"
+        "  %s -p <port> -b <baud> [options]\n"
         "  %s -k\n"
-        "  %s -s\n\n"
-        "Options:\n"
+        "  %s -s\n"
+        "\n"
+        "Required:\n"
         "  -p <port>       COM port: COM1..COM9 or \\\\.\\COM10 and above\n"
-        "  -b <baud>       baud rate: 1200..921600\n"
-        "  -a <n>          number of slave devices: 1..%d (default %d)\n"
-        "  -o <mode>       port framing: 8N1 8E1 8O1 7E1 8N2 (default 8N1)\n"
-        "  -f <id>:<file>  bind register file to slave <id> (repeatable)\n"
-        "                  one uint16 per line; C:\\temp\\ recommended\n"
-        "                  file absent or short -> missing regs are 0\n"
+        "  -b <baud>       baud rate: 1200 2400 4800 9600 19200 38400\n"
+        "                             57600 115200 230400 460800 921600\n"
+        "\n"
+        "Optional:\n"
+        "  -a <n>          number of slave devices: 1..%d (default: 1)\n"
+        "                  slave IDs are assigned 1..n\n"
+        "  -o <mode>       port framing (default: 8N1)\n"
+        "                  databits : 7 or 8\n"
+        "                  parity   : N=none  E=even  O=odd\n"
+        "                  stopbits : 1 or 2\n"
+        "                  examples : 8N1  8E1  8O1  7E1  8N2\n"
+        "  -f <id>:<file>  bind register file to slave <id>\n"
+        "                  can be specified multiple times\n"
+        "                  file format: one integer (0..65535) per line\n"
+        "                  missing lines -> 0, file absent -> all zeros\n"
+        "                  slave without -f uses random values\n"
+        "                  recommended path: C:\\temp\\s1.dat\n"
         "                  atomic update: write .tmp then move /Y\n"
-        "  -t <sec>        max file age in seconds (default 10, 0=disable)\n"
+        "  -t <sec>        max file age in seconds (default: 10)\n"
+        "                  if file not updated within <sec>s -> return zeros\n"
+        "                  use -t 0 to disable\n"
         "  -bg             run in background (detach from console)\n"
+        "                  logs written to C:\\temp\\modbus_slave.log\n"
+        "\n"
+        "Control:\n"
         "  -k              stop background instance\n"
-        "  -s              show background instance status\n\n"
-        "Each slave responds to FC03 with %d registers (addr 0..%d).\n"
-        "Statistics logged every %d seconds.\n\n"
-        "Examples:\n"
+        "  -s              show background instance status\n"
+        "\n"
+        "------------------------------------------------------------\n"
+        "Quick start examples:\n"
+        "\n"
+        "  # 1. Simplest: one slave (ID=1), random registers\n"
+        "  #    poll with: mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 COM4\n"
         "  %s -p COM3 -b 115200\n"
-        "  %s -p COM3 -b 115200 -a 5 -f 1:C:\\temp\\s1.dat -f 2:C:\\temp\\s2.dat\n"
-        "  %s -bg -p COM3 -b 115200 -a 3 -f 1:C:\\temp\\cpu.dat\n"
-        "  %s -k\n",
-        MAX_SLAVES, p, p, p,
-        MAX_SLAVES, SLAVES_DEFAULT,
-        NUM_REGS, NUM_REGS - 1, STAT_INTERVAL,
-        p, p, p, p);
+        "\n"
+        "  # 2. Five slaves, all random (IDs 1..5)\n"
+        "  #    poll with: mbpoll -m rtu -b 115200 -P none -a 3 -r 1 -c 20 COM4\n"
+        "  %s -p COM3 -b 115200 -a 5\n"
+        "\n"
+        "  # 3. Two slaves with real data (IDs 1,2), rest random (IDs 3..5)\n"
+        "  %s -p COM3 -b 115200 -a 5 -f 1:C:\\temp\\cpu.dat -f 2:C:\\temp\\time.dat\n"
+        "\n"
+        "  # 4. Background mode, 10 slaves (IDs 1..10)\n"
+        "  %s -bg -p COM3 -b 115200 -a 10 -f 1:C:\\temp\\cpu.dat -t 15\n"
+        "\n"
+        "  # 5. Different port framing\n"
+        "  %s -p COM3 -b 9600 -o 8E1 -a 3\n"
+        "\n"
+        "  # 6. Stop / status\n"
+        "  %s -k\n"
+        "  %s -s\n"
+        "------------------------------------------------------------\n"
+        "Register file format example (C:\\temp\\cpu.dat):\n"
+        "  4523    <- reg 0: temperature * 100 = 45.23 C\n"
+        "  1013    <- reg 1: pressure hPa\n"
+        "  0       <- reg 2: reserved\n"
+        "  ...     <- up to %d lines; missing lines -> 0\n"
+        "\n",
+        MAX_SLAVES, NUM_REGS,
+        p, p, p,
+        MAX_SLAVES,
+        p, p, p, p, p, p, p,
+        NUM_REGS);
 }
 
 /* ── main ────────────────────────────────────────────────────────────── */
@@ -355,6 +400,9 @@ int main(int argc, char *argv[])
 
     memset(g_regs_file, 0, sizeof(g_regs_file));
     memset(g_stat,      0, sizeof(g_stat));
+
+    /* Show help if no arguments given */
+    if (argc == 1) { usage(argv[0]); return 0; }
 
     /* Manual argument parsing (getopt is not available on MSVC) */
     for (int i = 1; i < argc; i++) {

@@ -129,31 +129,82 @@ move /Y C:\temp\s1.tmp C:\temp\s1.dat
 
 ## Examples
 
-### Linux — 5 slaves, two with real data
+### 1. Simplest — one slave, random registers
 ```bash
+# server
+./modbus_slave -p /dev/ttyUSB0 -b 115200
+
+# client
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 /dev/ttyUSB0
+```
+
+### 2. Five slaves, all random (IDs 1..5)
+```bash
+# server
+./modbus_slave -p /dev/ttyUSB0 -b 115200 -a 5
+
+# client — poll slave ID 3
+mbpoll -m rtu -b 115200 -P none -a 3 -r 1 -c 20 /dev/ttyUSB0
+```
+
+### 3. Two slaves with real data, rest random
+```bash
+# server — slaves 1,2 from files; slaves 3,4,5 random
 ./modbus_slave -p /dev/ttyUSB0 -b 115200 -a 5 \
     -f 1:/tmp/cpu.dat \
     -f 2:/tmp/time.dat
-# slaves 3, 4, 5 → random
+
+# client
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 /dev/ttyUSB0
 ```
 
-### Linux — daemon mode on NAPI2
+### 4. NAPI2 — RS-485, daemon mode
 ```bash
+# server
 ./modbus_slave -d -p /dev/ttyS7 -b 115200 -a 10 \
     -f 1:/tmp/cpu.dat \
     -t 15
+
+# client (from PC over RS-485 adapter)
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 /dev/ttyUSB0
+
+# logs
+journalctl -t modbus_slave -f
 ```
 
-### Windows — 3 slaves
+### 5. Windows — 3 slaves
 ```cmd
+# server
 modbus_slave.exe -p COM4 -b 115200 -a 3 -f 1:C:\temp\s1.dat -f 2:C:\temp\s2.dat
+
+# client
+mbpoll -m rtu -b 115200 -P none -a 1 -r 1 -c 20 COM4
 ```
 
-### Windows — background
+### 6. Windows — background mode
 ```cmd
 modbus_slave.exe -bg -p COM4 -b 115200 -a 3 -f 1:C:\temp\s1.dat
 modbus_slave.exe -s
 modbus_slave.exe -k
+```
+
+---
+
+## Log output
+
+Statistics are printed every 60 seconds with timestamp, per-interval delta counters,
+and per-slave breakdown showing request count and data source:
+
+```
+[2026-03-31 14:25:00] stats: slaves=3  interval_ok=180 interval_err=0  total_ok=3600 total_err=0
+  id=1   ok=60     src=file/tmp/cpu.dat
+  id=2   ok=60     src=file/tmp/time.dat
+  id=3   ok=60     src=random
+```
+
+If a register file becomes stale (not updated within `-t` seconds):
+```
+file /tmp/cpu.dat is stale (45s > 10s), returning zeros
 ```
 
 ---
