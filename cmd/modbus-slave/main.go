@@ -60,6 +60,9 @@ type opts struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "line-test" {
+		os.Exit(lineTest(os.Args[2:]))
+	}
 	var o opts
 	fs := flag.NewFlagSet("modbus-slave", flag.ExitOnError)
 	fs.Var(&o.ports, "p", "serial port: /dev/ttyUSB0, /dev/ttyS7, or FT4232H channel 0..3 (A..D, survives re-plug); repeat for several lines")
@@ -92,7 +95,7 @@ func main() {
 	fs.BoolVar(&o.stat, "s", false, "show daemon status")
 	fs.BoolVar(&o.showVersion, "version", false, "print version")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "modbus-slave %s — Modbus RTU slave emulator\n\nUsage:\n  modbus-slave -p <port> -b <baud> [-a n] [-o 8N1] [-f id:file] [-t s] [options]\n  modbus-slave -k | -s\n\nOptions:\n", version)
+		fmt.Fprintf(os.Stderr, "modbus-slave %s — Modbus RTU slave emulator\n\nUsage:\n  modbus-slave -p <port> -b <baud> [-a n] [-o 8N1] [-f id:file] [-t s] [options]\n  modbus-slave -k | -s\n  modbus-slave line-test send|listen -p <port> [-p ...] -b <baud>   (raw line test, see line-test -h)\n\nOptions:\n", version)
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])

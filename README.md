@@ -126,6 +126,25 @@ curl -s localhost:8650/api/v1/status
 curl -s -X PUT -d '{"drop": 0.05}' localhost:8650/api/v1/lines/2/faults
 ```
 
+## Line test
+
+A raw test of the RS-485 line itself, without Modbus: one side sends on all ports at once, the other listens;
+then swap the roles. It shows crossed pairs, dead pairs and the speed limit of a long line in a minute.
+
+```sh
+modbus-slave line-test listen -p 0 -p 1 -p 2 -p 3 -b 57600 --secs 6     # start first
+modbus-slave line-test send   -p 0 -p 1 -p 2 -p 3 -b 57600 --secs 3
+```
+
+`--pattern tokens` (default) sends `<P1 00042>`: the listener tells which port reached it and how many bytes are
+wrong. `--pattern bytes` sends `00..FF` and counts flipped bits — a line too slow for the baud rate turns a lone 0
+after 1s into 1 (`03` arrives as `07`). A real run, 915 m of twisted pair at 115200:
+
+```
+  0              30730 bytes  30597 bytes off the counter; first 64 bytes: bits 0->1 33, 1->0 0
+               first bytes: 00 01 02 07 04 05 0E 0F 08 09 0A 0F 1C 1D 1E 1F
+```
+
 ## Statistics
 
 ```
