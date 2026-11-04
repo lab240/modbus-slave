@@ -13,13 +13,15 @@
 One static binary, no dependencies. v2 is a rewrite in Go of the C version (v1, still in `src/`);
 the v1 command line keeps working.
 
-> Status: **v2 is in development** (branch `v2`). Linux only for now; the Windows build of v1 stays in
-> `bin/` until v2 has a Windows serial port.
+> Status: **v2 is in development** (branch `v2`). Linux is tested (also on real FT4232H lines); the Windows
+> build (`COM3`, Win32 API) compiles but has **not been tried on Windows yet** — the v1 `.exe` stays in `bin/`
+> until it has. On Windows: ports are `COM<n>`; no `--pty` (use a com0com pair), no FT4232H channel numbers,
+> no `-d/-k/-s`; the FTDI latency is set in the driver (Device Manager → port → Advanced).
 
 ## Build
 
 ```sh
-./build.sh                 # dist/modbus-slave-linux-{amd64,arm64,arm}, static
+./build.sh                 # dist/modbus-slave-linux-{amd64,arm64,arm} (static), dist/modbus-slave-windows-amd64.exe
 go build ./cmd/modbus-slave
 go test -race ./...
 ```

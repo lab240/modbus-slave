@@ -10,3 +10,6 @@ for t in linux/amd64 linux/arm64 linux/arm; do
 	CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=7 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$out" ./cmd/modbus-slave
 	echo "$out"
 done
+out=dist/modbus-slave-windows-amd64.exe
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$out" ./cmd/modbus-slave
+echo "$out"
