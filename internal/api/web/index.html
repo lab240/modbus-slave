@@ -40,6 +40,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16p
 .tile .seg button { padding: 2px 6px; }
 .addr { display: grid; grid-template-columns: 54px auto minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; }
 .tile select.crazy { border-color: var(--crazy); color: var(--crazy); font-weight: 600; }
+.poll { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.warnTxt { color: var(--warn); font-family: inherit; }
 .addr > span { color: var(--muted); font-size: 12px; }
 .tile.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .tile:not(.sel):hover { border-color: var(--muted); }
@@ -135,6 +137,7 @@ h4 { font-size: 13px; margin: 18px 0 8px; }
 'use strict';
 const RU = (navigator.language || '').toLowerCase().startsWith('ru');
 const T = {
+  pollAt: ['Poll at', 'Опрашивать'], localOnly: ['this board only', 'только с этой платы'],
   sensor: ['Sensor', 'Датчик'], template: ['Template', 'Шаблон'], address: ['Address', 'Адрес'], link: ['Link', 'Связь'], linkMode: ['Link, mode', 'Связь, режим'],
   port: ['Port', 'Порт'], baud: ['Speed', 'Скорость'], baudFmt: ['Speed', 'Скорость'], format: ['Parity', 'Чётность'], tcpPort: ['TCP port', 'TCP-порт'],
   mode: ['Mode', 'Режим'], normal: ['Normal', 'Нормальный'], crazy: ['Crazy', 'Психованный'], normalS: ['Normal', 'Норма'], crazyS: ['Crazy', 'Псих'],
@@ -287,6 +290,16 @@ function portLabel(path) {
   return p ? p.dev.replace('/dev/', '') + (info ? ' · ' + info : '') : path;
 }
 
+// Where a master connects to a TCP sensor: this board, by the address the page was opened with.
+function pollLine(s, port) {
+  const l = s.listen || ':502';
+  const h = l.slice(0, l.lastIndexOf(':')).replace(/^\[|\]$/g, '');
+  const local = ['127.0.0.1', 'localhost', '::1'].includes(h);
+  let host = !h || h === '0.0.0.0' || h === '::' ? location.hostname : h;
+  if (host.includes(':')) host = `[${host}]`;
+  return `<div class="field"><span>${t('pollAt')}</span><div class="mono poll" title="mbpoll -m tcp -p ${esc(port)} -a ${s.unit} -r 1 -c 2 ${esc(host)}">${esc(host)}:${esc(port)} · unit ${s.unit}${local ? ` <span class="warnTxt">(${t('localOnly')})</span>` : ''}</div></div>`;
+}
+
 function controls(s) {
   const tcp = s.transport === 'tcp';
   const tmpl = S.templates.map(x => `<option value="${esc(x.name)}"${x.name === s.profile ? ' selected' : ''}>${esc(x.name === 'generic' ? t('virtual') : x.title)}</option>`).join('');
@@ -310,6 +323,7 @@ function controls(s) {
       <input type="number" min="1" max="247" data-f="unit" value="${s.unit}" title="${t('address')}">
       ${tcp ? `<span>${t('tcpPort')}</span><input type="number" min="1" max="65535" data-f="listen" value="${esc(tport)}">`
             : `<span>${t('port')}</span><select data-f="port"${s.pty ? ' disabled' : ''}>${ports}</select>`}</div></div>
+    ${tcp ? pollLine(s, tport) : ''}
     ${tcp ? '' : `<div class="field"><span>${t('baudFmt')}</span><div class="pair">
          <select data-f="baud" title="${t('baud')}">${bauds}</select>
          <select data-f="mode" title="${t('format')}">${fmts}</select></div></div>`}`;
