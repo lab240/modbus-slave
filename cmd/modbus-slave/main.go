@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lab240/modbus-slave/internal/api"
 	"github.com/lab240/modbus-slave/internal/device"
 	"github.com/lab240/modbus-slave/internal/profile"
 	"github.com/lab240/modbus-slave/internal/rtu"
@@ -55,6 +56,7 @@ type opts struct {
 	daemon, kill, stat bool
 	showVersion        bool
 	listProfiles       bool
+	apiAddr, apiToken  string
 }
 
 func main() {
@@ -82,7 +84,9 @@ func main() {
 	fs.IntVar(&o.latency, "latency", 1, "FTDI latency_timer, ms (0 = leave as is)")
 	fs.Float64Var(&o.gap, "gap", 20, "silence that discards a partial frame, ms (0 = t3.5 of the baud rate)")
 	fs.Float64Var(&o.report, "report", 60, "statistics interval, s (0 = off)")
-	fs.Uint64Var(&o.seed, "seed", uint64(time.Now().UnixNano()), "random seed (repeatable runs)")
+	fs.Uint64Var(&o.seed, "seed", 0, "random seed for repeatable runs (0 = new every start)")
+	fs.StringVar(&o.apiAddr, "api", "", "local JSON API: 127.0.0.1:PORT or unix:/path (off by default)")
+	fs.StringVar(&o.apiToken, "api-token-file", "", "file with a token for the API (Authorization: Bearer); needed for a non-loopback --api")
 	fs.BoolVar(&o.daemon, "d", false, "run as a background daemon (logs -> syslog); with systemd use the unit instead")
 	fs.BoolVar(&o.kill, "k", false, "stop the running daemon")
 	fs.BoolVar(&o.stat, "s", false, "show daemon status")
@@ -112,6 +116,9 @@ func main() {
 	}
 	if o.daemon {
 		os.Exit(daemonize())
+	}
+	if o.seed == 0 {
+		o.seed = uint64(time.Now().UnixNano())
 	}
 	cleanup := daemonChild()
 	err := run(o)
@@ -254,6 +261,24 @@ func run(o opts) error {
 	}
 	if o.report > 0 {
 		go reporter(ctx, lines, time.Duration(o.report*float64(time.Second)))
+	}
+	if o.apiAddr != "" {
+		token := ""
+		if o.apiToken != "" {
+			b, err := os.ReadFile(o.apiToken)
+			if err != nil {
+				return err
+			}
+			token = strings.TrimSpace(string(b))
+		}
+		ln, err := api.Listen(o.apiAddr, token)
+		if err != nil {
+			return err
+		}
+		a := api.New(api.Info{Version: version, Profile: o.profile, Mode: cfg.String(), Baud: cfg.Baud}, lines, token)
+		go a.Serve(ln)
+		go func() { <-ctx.Done(); ln.Close() }()
+		log.Printf("api on %s", o.apiAddr)
 	}
 	wg.Wait()
 	for i, l := range lines {

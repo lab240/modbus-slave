@@ -116,3 +116,17 @@ func (d *Device) Handle(pdu []byte) []byte {
 	}
 	return rtu.Exception(fc, rtu.ExcIllegalFunction)
 }
+
+// ReadRegs reads registers for the API (not counted as a request, no function-code check).
+func (d *Device) ReadRegs(fc byte, addr, count uint16) ([]uint16, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.Regs.Read(fc, addr, count)
+}
+
+// WriteRegs writes registers for the API, with the same rules as FC 16 (only writable registers).
+func (d *Device) WriteRegs(addr uint16, vals []uint16) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.Regs.Write(addr, vals)
+}

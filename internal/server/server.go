@@ -14,6 +14,7 @@ import (
 )
 
 // Faults are injected into the answers, to test the master side.
+// They can be changed while the line runs (Line.SetFaults).
 type Faults struct {
 	Delay   time.Duration // answer delay
 	Jitter  time.Duration // + random 0..Jitter
@@ -45,19 +46,30 @@ type Line struct {
 	Index   int
 	Spec    string // what the user gave: path, FT4232H channel, pty link
 	Devices []*device.Device
-	Faults  Faults
+	faults  atomic.Pointer[Faults]
 	Gap     time.Duration // silence that discards a partial frame
 	Stats   Stats
 
-	mu  sync.Mutex
-	rnd *rand.Rand
-	dev string // device in use right now, for the report
+	mu   sync.Mutex
+	rnd  *rand.Rand
+	dev  string // device in use right now, for the report
+	open atomic.Bool
 }
 
+// Open reports whether the port is open and served right now.
+func (l *Line) Open() bool { return l.open.Load() }
+
 func NewLine(index int, spec string, devs []*device.Device, f Faults, gap time.Duration, seed uint64) *Line {
-	return &Line{Index: index, Spec: spec, Devices: devs, Faults: f, Gap: gap,
-		rnd: rand.New(rand.NewPCG(seed, uint64(index)+1))}
+	l := &Line{Index: index, Spec: spec, Devices: devs, Gap: gap, rnd: rand.New(rand.NewPCG(seed, uint64(index)+1))}
+	l.SetFaults(f)
+	return l
 }
+
+// Faults returns the current fault settings.
+func (l *Line) Faults() Faults { return *l.faults.Load() }
+
+// SetFaults changes the fault settings; the next request uses them.
+func (l *Line) SetFaults(f Faults) { l.faults.Store(&f) }
 
 func (l *Line) Device() string     { l.mu.Lock(); defer l.mu.Unlock(); return l.dev }
 func (l *Line) setDevice(d string) { l.mu.Lock(); l.dev = d; l.mu.Unlock() }
@@ -71,13 +83,13 @@ func (l *Line) chance(p float64) bool {
 	return l.rnd.Float64() < p
 }
 
-func (l *Line) jitter() time.Duration {
-	if l.Faults.Jitter <= 0 {
+func (l *Line) jitter(j time.Duration) time.Duration {
+	if j <= 0 {
 		return 0
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return time.Duration(l.rnd.Int64N(int64(l.Faults.Jitter)))
+	return time.Duration(l.rnd.Int64N(int64(j)))
 }
 
 func (l *Line) find(unit byte) *device.Device {
@@ -94,6 +106,8 @@ func (l *Line) find(unit byte) *device.Device {
 // last byte; silence (Gap) only throws away a partial frame.
 func (l *Line) Serve(ctx context.Context, c serial.Conn) error {
 	l.setDevice(c.Name())
+	l.open.Store(true)
+	defer l.open.Store(false)
 	buf := make([]byte, 0, 512)
 	rd := make([]byte, 512)
 	var last time.Time
@@ -172,12 +186,13 @@ func (l *Line) answer(c serial.Conn, frame []byte) error {
 	}
 	l.Stats.Req.Add(1)
 	d.Served.Add(1)
-	if l.chance(l.Faults.Drop) {
+	f := l.Faults()
+	if l.chance(f.Drop) {
 		l.Stats.Drop.Add(1)
 		return nil
 	}
 	var ans []byte
-	if l.chance(l.Faults.Exc) {
+	if l.chance(f.Exc) {
 		ans = rtu.Exception(pdu[0], rtu.ExcDeviceFailure)
 	} else {
 		ans = d.Handle(pdu)
@@ -186,35 +201,35 @@ func (l *Line) answer(c serial.Conn, frame []byte) error {
 		l.Stats.Exc.Add(1)
 	}
 	out := rtu.AppendCRC(append([]byte{unit}, ans...))
-	if l.chance(l.Faults.BadCRC) {
+	if l.chance(f.BadCRC) {
 		out[len(out)-1] ^= 0x5A
 		out[len(out)-2] ^= 0x5A
 		l.Stats.BadCRC.Add(1)
 	}
-	if d := l.Faults.Delay + l.jitter(); d > 0 {
+	if d := f.Delay + l.jitter(f.Jitter); d > 0 {
 		time.Sleep(d)
 	}
-	if err := l.send(c, out); err != nil {
+	if err := l.send(c, out, f); err != nil {
 		return err
 	}
 	l.Stats.Ans.Add(1)
 	return nil
 }
 
-func (l *Line) send(c serial.Conn, out []byte) error {
-	if f := l.Faults.Frag; f > 1 { // answer in pieces with a pause: tests the master's t3.5 handling
+func (l *Line) send(c serial.Conn, out []byte, fl Faults) error {
+	if f := fl.Frag; f > 1 { // answer in pieces with a pause: tests the master's t3.5 handling
 		step := (len(out) + f - 1) / f
 		for i := 0; i < len(out); i += step {
 			if _, err := c.Write(out[i:min(i+step, len(out))]); err != nil {
 				return err
 			}
 			c.Drain()
-			time.Sleep(l.Faults.FragGap)
+			time.Sleep(fl.FragGap)
 		}
 	} else if _, err := c.Write(out); err != nil {
 		return err
 	}
-	if l.Faults.Echo { // eat our own bytes
+	if fl.Echo { // eat our own bytes
 		c.Drain()
 		need, end, rd := len(out), time.Now().Add(500*time.Millisecond), make([]byte, len(out))
 		for need > 0 && time.Now().Before(end) {
