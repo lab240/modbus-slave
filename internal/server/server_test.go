@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/lab240/modbus-slave/internal/device"
+	"github.com/lab240/modbus-slave/internal/profile"
 	"github.com/lab240/modbus-slave/internal/rtu"
 	"github.com/lab240/modbus-slave/internal/serial"
 )
@@ -25,7 +26,14 @@ func TestServePty(t *testing.T) {
 		t.Skip("no pty:", err)
 	}
 	defer c.Close()
-	l := NewLine(1, link, []*device.Device{device.NewKTH2R(1, 1, 19200, 'N'), device.NewKTH2R(2, 1, 19200, 'N')}, Faults{}, 20*time.Millisecond, 1)
+	p, err := profile.Load("kth2r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := profile.Env{Line: 1, Baud: 19200, Parity: 'N'}
+	e1, e2 := env, env
+	e1.Unit, e2.Unit = 1, 2
+	l := NewLine(1, link, []*device.Device{profile.Build(p, e1), profile.Build(p, e2)}, Faults{}, 20*time.Millisecond, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go l.Serve(ctx, c)

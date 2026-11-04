@@ -1,0 +1,17 @@
+# A soft sensor: real values from files written by scripts, everything else const.
+#   modbus-slave -p /dev/ttyS7 -b 9600 --profile examples/soft-sensor.yaml --units 1
+#   scripts/cpu_temp_to_modbus.sh writes /tmp/cpu.dat (°C x100, one value per line)
+name: soft-sensor
+description: CPU temperature and uptime from files, as float32 and uint32
+functions: [3, 4]
+holding:
+  - {addr: 0, string: "NAPI SOFT"}                         # 0..4: device name
+  - {addr: 10, special: unit}                              # 10: address
+  # 20..21: CPU temperature, °C, float32 (file holds °C x100 -> scale 0.01); stale (> 15 s) -> exception 4
+  - {addr: 20, type: float32, scale: 0.01, file: /tmp/cpu.dat, max_age: 15, on_stale: exception}
+  # 22: the same as int16 °C x10
+  - {addr: 22, type: int16, scale: 0.1, file: /tmp/cpu.dat, max_age: 15}
+  # 30..31: seconds since boot, uint32 (any script: awk '{print int($1)}' /proc/uptime > /tmp/up.dat)
+  - {addr: 30, type: uint32, file: /tmp/up.dat, max_age: 0}
+  # 40..43: set points the master writes and reads back
+  - {addr: 40, count: 4, value: 0, rw: true}

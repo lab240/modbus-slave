@@ -13,6 +13,16 @@ import (
 // ErrAddress is returned by a register map for an unmapped or read-only address (-> exception 2).
 var ErrAddress = errors.New("illegal data address")
 
+// ErrDeviceFailure is returned when the data is not available (e.g. a stale file) (-> exception 4).
+var ErrDeviceFailure = errors.New("server device failure")
+
+func excFor(fc byte, err error) []byte {
+	if errors.Is(err, ErrDeviceFailure) {
+		return rtu.Exception(fc, rtu.ExcDeviceFailure)
+	}
+	return rtu.Exception(fc, rtu.ExcIllegalAddress)
+}
+
 // Regs is a register map. Read gets count registers starting at addr in one go, so a source
 // backed by a file is read once per request, not once per register.
 type Regs interface {
@@ -66,7 +76,7 @@ func (d *Device) Handle(pdu []byte) []byte {
 		}
 		vals, err := d.Regs.Read(fc, addr, count)
 		if err != nil {
-			return rtu.Exception(fc, rtu.ExcIllegalAddress)
+			return excFor(fc, err)
 		}
 		out := make([]byte, 2, 2+2*len(vals))
 		out[0], out[1] = fc, byte(2*count)
@@ -79,7 +89,7 @@ func (d *Device) Handle(pdu []byte) []byte {
 			return rtu.Exception(fc, rtu.ExcIllegalValue)
 		}
 		if err := d.Regs.Write(be.Uint16(pdu[1:]), []uint16{be.Uint16(pdu[3:])}); err != nil {
-			return rtu.Exception(fc, rtu.ExcIllegalAddress)
+			return excFor(fc, err)
 		}
 		return append([]byte(nil), pdu[:5]...)
 	case 16:
@@ -95,7 +105,7 @@ func (d *Device) Handle(pdu []byte) []byte {
 			vals[i] = be.Uint16(pdu[6+2*i:])
 		}
 		if err := d.Regs.Write(addr, vals); err != nil {
-			return rtu.Exception(fc, rtu.ExcIllegalAddress)
+			return excFor(fc, err)
 		}
 		return append([]byte(nil), pdu[:5]...)
 	case 8:

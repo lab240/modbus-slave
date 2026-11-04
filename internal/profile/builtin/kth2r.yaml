@@ -1,0 +1,20 @@
+# KTH2-R temperature / humidity sensor (T and RH x10), as on the mbus-gw-t2r test stand.
+# T and RH drift as a sawtooth; the base differs per line (line_step), so a crossed line shows up at once.
+# Registers 0x1000.. and 0x2000.. are emulator-only: who answered (line, unit) and a 125-register block.
+name: kth2r
+description: KTH2-R T/RH sensor (T, RH x10; passport, address, corrections, test registers)
+functions: [3, 4, 6, 8, 16]
+holding:
+  - {addr: 0x0000, values: [0x0001, 0x0120]}          # model, firmware
+  - {addr: 0x0002, string: "KTH2-R"}                  # name
+  - {addr: 0x000C, special: unit, rw: true}           # address; FC 6 with 1..247 changes it
+  - {addr: 0x000D, special: speed_code}               # 0=1200 .. 7=115200, 0xFF other
+  - {addr: 0x000E, special: parity_code}              # 0=N 1=E 2=O
+  - {addr: 0x0300, type: int16, add: 0x04FF,          # T x10 = 21.0 + 1.0*line +-0.5, period 120 s
+     wave: {shape: saw, base: 210, line_step: 10, amp: 5, period: 120}}
+  - {addr: 0x0301, add: 0x0500,                       # RH x10 = 30.0 + 1.0*line +-1.0, period 180 s
+     wave: {shape: saw, base: 300, line_step: 10, amp: 10, period: 180}}
+  - {addr: 0x04FF, count: 2, type: int16, value: 0, rw: true}   # T / RH correction
+  - {addr: 0x1000, specials: [served_hi, served_lo, line, unit, baud100]}
+  - {addr: 0x2000, count: 125, rw: true,              # 0x1000*(line+1) + 0x100*unit + i
+     base: 0x1000, line_step: 0x1000, unit_step: 0x100, index_step: 1}

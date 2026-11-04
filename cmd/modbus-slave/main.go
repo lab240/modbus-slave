@@ -3,7 +3,7 @@
 // v1-compatible:  modbus-slave -p /dev/ttyUSB0 -b 115200 -a 5 -f 1:/tmp/cpu.dat -t 15 [-o 8N1] [-d | -k | -s]
 // v2 additions:   several -p (each one is a line), FT4232H channels (-p 0..3 / A..D), --pty LINK,
 //
-//	--profile kth2r, --units 1-4,7, fault injection, any baud rate.
+//	--profile kth2r | file.yaml (YAML device profiles), --units 1-4,7, fault injection, any baud rate.
 package main
 
 import (
@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/lab240/modbus-slave/internal/device"
+	"github.com/lab240/modbus-slave/internal/profile"
 	"github.com/lab240/modbus-slave/internal/rtu"
 	"github.com/lab240/modbus-slave/internal/serial"
 	"github.com/lab240/modbus-slave/internal/server"
@@ -53,6 +54,7 @@ type opts struct {
 	seed               uint64
 	daemon, kill, stat bool
 	showVersion        bool
+	listProfiles       bool
 }
 
 func main() {
@@ -66,7 +68,8 @@ func main() {
 	fs.StringVar(&o.units, "units", "", "unit IDs instead of -a, e.g. 1-4,7")
 	fs.Var(&o.files, "f", "[line.]id:file — register values of slave id from a text file (one value per line); repeatable")
 	fs.IntVar(&o.maxAge, "t", 10, "max file age, s: an older file gives zeros (0 = no check)")
-	fs.StringVar(&o.profile, "profile", "generic", "device: generic (v1: N holding registers, random or file) | kth2r (KTH2-R T/RH sensor)")
+	fs.StringVar(&o.profile, "profile", "generic", "device: generic (v1: N holding registers, random or -f file), a built-in profile (--list-profiles) or a YAML file")
+	fs.BoolVar(&o.listProfiles, "list-profiles", false, "list the built-in profiles")
 	fs.IntVar(&o.regs, "regs", 20, "generic: number of registers")
 	fs.Float64Var(&o.delay, "delay", 0, "answer delay, ms")
 	fs.Float64Var(&o.jitter, "jitter", 0, "random extra answer delay 0..N ms")
@@ -91,6 +94,13 @@ func main() {
 	fs.Parse(os.Args[1:])
 	if o.showVersion {
 		fmt.Println("modbus-slave", version)
+		return
+	}
+	if o.listProfiles {
+		for _, n := range profile.Builtin() {
+			p, _ := profile.Load(n)
+			fmt.Printf("%-12s %s\n", n, p.Description)
+		}
 		return
 	}
 	if o.kill || o.stat {
@@ -183,12 +193,16 @@ func run(o opts) error {
 	if err != nil {
 		return err
 	}
-	if o.profile != "generic" && o.profile != "kth2r" {
-		return fmt.Errorf("--profile %q: want generic or kth2r", o.profile)
+	var prof *profile.Profile
+	if o.profile != "generic" {
+		if prof, err = profile.Load(o.profile); err != nil {
+			return err
+		}
+		if len(files) > 0 {
+			return fmt.Errorf("-f works with --profile generic; in a YAML profile use file: in the register map")
+		}
 	}
-	if o.profile == "kth2r" && len(files) > 0 {
-		return fmt.Errorf("-f works with --profile generic")
-	}
+	env := profile.Env{Baud: cfg.Baud, Parity: cfg.Parity, Seed: o.seed, Start: time.Now(), Files: &profile.Files{}}
 	gap := time.Duration(o.gap * float64(time.Millisecond))
 	if gap <= 0 {
 		gap = rtu.T35(cfg.Baud, cfg.BitsPerChar())
@@ -202,8 +216,10 @@ func run(o opts) error {
 	for i, spec := range specs {
 		var devs []*device.Device
 		for _, u := range units {
-			if o.profile == "kth2r" {
-				devs = append(devs, device.NewKTH2R(u, i, cfg.Baud, cfg.Parity))
+			if prof != nil {
+				e := env
+				e.Line, e.Unit = i, u
+				devs = append(devs, profile.Build(prof, e))
 				continue
 			}
 			var src source.Block = source.NewRandom(o.seed + uint64(i)*1000 + uint64(u))

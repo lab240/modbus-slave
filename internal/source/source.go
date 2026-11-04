@@ -43,8 +43,8 @@ func (r *Random) Describe() string { return "random" }
 // File reads values from a text file, one per line, written by an external script (sensor, sysfs, ...).
 // As in v1: a missing file gives zeros; with MaxAge > 0 a file not modified for longer than MaxAge gives
 // zeros too, so a dead data script shows up at the master instead of frozen values.
-// v2: the file is re-read only when its mtime or size changes; a value may be negative (-32768..-1 is
-// stored as two's complement) or a hex number (0x1F); text after the number ("4523 # T x100") is ignored.
+// v2: the file is re-read only when its mtime or size changes; a value may be negative, hex (0x1F) or
+// fractional (45.23, for profiles with a scale); text after the number ("4523 # T x100") is ignored.
 type File struct {
 	Path   string
 	MaxAge time.Duration
@@ -52,37 +52,49 @@ type File struct {
 	mu       sync.Mutex
 	mtime    time.Time
 	size     int64
-	cache    []uint16
+	cache    []float64
 	lastWarn time.Time
 }
 
 func (f *File) Describe() string { return "file " + f.Path }
 
-func (f *File) Values(n int) []uint16 {
+// Read returns the numbers in the file; ok = false when the file is missing, unreadable or stale.
+func (f *File) Read() (vals []float64, ok bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	zeros := make([]uint16, n)
 	st, err := os.Stat(f.Path)
 	if err != nil {
-		f.warn("file %s: %v, returning zeros", f.Path, err)
-		return zeros
+		f.warn("file %s: %v", f.Path, err)
+		return nil, false
 	}
 	if f.MaxAge > 0 {
 		if age := time.Since(st.ModTime()); age > f.MaxAge {
-			f.warn("file %s is stale (%ds > %ds), returning zeros", f.Path, int(age.Seconds()), int(f.MaxAge.Seconds()))
-			return zeros
+			f.warn("file %s is stale (%ds > %ds)", f.Path, int(age.Seconds()), int(f.MaxAge.Seconds()))
+			return nil, false
 		}
 	}
 	if f.cache == nil || !st.ModTime().Equal(f.mtime) || st.Size() != f.size {
 		vals, err := readValues(f.Path)
 		if err != nil {
-			f.warn("file %s: %v, returning zeros", f.Path, err)
-			return zeros
+			f.warn("file %s: %v", f.Path, err)
+			return nil, false
 		}
 		f.cache, f.mtime, f.size = vals, st.ModTime(), st.Size()
 	}
-	copy(zeros, f.cache)
-	return zeros
+	return f.cache, true
+}
+
+// Values is the v1 behaviour: n registers, integers as uint16 (negative = two's complement), zeros on failure.
+func (f *File) Values(n int) []uint16 {
+	out := make([]uint16, n)
+	vals, ok := f.Read()
+	if !ok {
+		return out
+	}
+	for i := 0; i < n && i < len(vals); i++ {
+		out[i] = uint16(int64(vals[i]))
+	}
+	return out
 }
 
 // warn logs at most once a minute, so a script that is down for hours does not flood the log.
@@ -93,31 +105,35 @@ func (f *File) warn(format string, args ...any) {
 	}
 }
 
-func readValues(path string) ([]uint16, error) {
+func readValues(path string) ([]float64, error) {
 	fh, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer fh.Close()
-	var vals []uint16
+	var vals []float64
 	sc := bufio.NewScanner(fh)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
 		if len(fields) == 0 {
 			continue // as v1 (fscanf skips white space): empty lines do not count
 		}
-		v, ok := parseValue(fields[0])
+		v, ok := ParseNumber(fields[0])
 		if !ok {
-			break
+			break // as v1: the data ends at the first thing that is not a number
 		}
 		vals = append(vals, v)
 	}
 	return vals, sc.Err()
 }
 
-func parseValue(s string) (uint16, bool) {
-	if v, err := strconv.ParseInt(s, 0, 32); err == nil && v >= -32768 && v <= 65535 {
-		return uint16(v), true
+// ParseNumber accepts 4523, -5, 0x1F, 45.23.
+func ParseNumber(s string) (float64, bool) {
+	if v, err := strconv.ParseInt(s, 0, 64); err == nil {
+		return float64(v), true
+	}
+	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return v, true
 	}
 	return 0, false
 }
