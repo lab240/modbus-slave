@@ -33,21 +33,26 @@ main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16p
 .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); }
 .dot.polled { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
-.tile { cursor: pointer; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-content: start; min-width: 0; overflow: hidden; }
-.tile .ctl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.tile { cursor: pointer; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; overflow: hidden; }
+.tile .ctl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
+.tile select, .tile input[type=number] { padding: 2px 6px; }
+.tile .seg button { padding: 2px 6px; }
+.addr { display: grid; grid-template-columns: 54px auto minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; }
+.tile select.crazy { border-color: var(--crazy); color: var(--crazy); font-weight: 600; }
+.addr > span { color: var(--muted); font-size: 12px; }
 .tile.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .tile:not(.sel):hover { border-color: var(--muted); }
 .tile select, .tile input { cursor: auto; }
 .tile.crazy { border-top: 3px solid var(--crazy); }
 .tile .top { display: flex; align-items: center; gap: 8px; }
-.tile .top h2 { font-size: 16px; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .top h2 { font-size: 15px; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile .top h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .icon { border: none; background: none; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 6px; font-size: 15px; }
 .icon:hover { background: var(--soft); color: var(--text); }
-.field { display: grid; grid-template-columns: 82px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.field { display: grid; grid-template-columns: 70px minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; }
 .field > span { color: var(--muted); font-size: 12px; }
-.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; min-width: 0; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; min-width: 0; }
 .pair label { display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
 select { text-overflow: ellipsis; }
 select, input[type=number], input[type=text], input[type=password] {
@@ -59,9 +64,9 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.sel { background: var(--accent); color: #fff; }
 .seg button.sel.crazy { background: var(--crazy); }
-.live { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; }
+.live { border-top: 1px solid var(--line); padding-top: 5px; display: grid; gap: 3px; }
 .values { display: flex; flex-wrap: wrap; gap: 4px 14px; min-width: 0; }
-.values .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.values .v { font-size: 17px; line-height: 1.2; font-weight: 600; font-variant-numeric: tabular-nums; }
 .values .v small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 3px; }
 .values .l { font-size: 11px; color: var(--muted); }
 .state { font-size: 12px; color: var(--muted); display: flex; align-items: center; }
@@ -130,9 +135,9 @@ h4 { font-size: 13px; margin: 18px 0 8px; }
 'use strict';
 const RU = (navigator.language || '').toLowerCase().startsWith('ru');
 const T = {
-  sensor: ['Sensor', 'Датчик'], template: ['Template', 'Шаблон'], address: ['Address', 'Адрес'], link: ['Link', 'Связь'],
-  port: ['Port', 'Порт'], baud: ['Speed', 'Скорость'], baudFmt: ['Speed, parity', 'Скорость, чётность'], format: ['Parity', 'Чётность'], tcpPort: ['TCP port', 'TCP-порт'],
-  mode: ['Mode', 'Режим'], normal: ['Normal', 'Нормальный'], crazy: ['Crazy', 'Психованный'],
+  sensor: ['Sensor', 'Датчик'], template: ['Template', 'Шаблон'], address: ['Address', 'Адрес'], link: ['Link', 'Связь'], linkMode: ['Link, mode', 'Связь, режим'],
+  port: ['Port', 'Порт'], baud: ['Speed', 'Скорость'], baudFmt: ['Speed', 'Скорость'], format: ['Parity', 'Чётность'], tcpPort: ['TCP port', 'TCP-порт'],
+  mode: ['Mode', 'Режим'], normal: ['Normal', 'Нормальный'], crazy: ['Crazy', 'Психованный'], normalS: ['Normal', 'Норма'], crazyS: ['Crazy', 'Псих'],
   add: ['+ Add a sensor', '+ Добавить датчик'], remove: ['Remove', 'Удалить'], registers: ['Registers', 'Регистры'],
   confirmRemove: ['Remove sensor', 'Удалить датчик'], other: ['other…', 'другой…'],
   waiting: ['open, waiting for the master', 'открыт, ждёт запросов мастера'], polled: ['polled', 'опрашивается'],
@@ -298,16 +303,16 @@ function controls(s) {
       <button class="icon" data-act="regs" title="${t('registers')}">☰</button>
       <button class="icon" data-act="del" title="${t('remove')}">✕</button></div>
     <div class="field"><span>${t('template')}</span><select data-f="profile">${tmpl}</select></div>
-    <div class="field"><span>${t('address')}</span><input type="number" min="1" max="247" data-f="unit" value="${s.unit}"></div>
-    <div class="field"><span>${t('link')}</span><div class="seg">
-      <button data-tr="rtu" class="${tcp ? '' : 'sel'}">RTU</button><button data-tr="tcp" class="${tcp ? 'sel' : ''}">TCP</button></div></div>
-    ${tcp ? `<div class="field"><span>${t('tcpPort')}</span><input type="number" min="1" max="65535" data-f="listen" value="${esc(tport)}"></div>`
-    : `<div class="field"><span>${t('port')}</span><select data-f="port"${s.pty ? ' disabled' : ''}>${ports}</select></div>
-       <div class="field"><span>${t('baudFmt')}</span><div class="pair">
+    <div class="field"><span>${t('linkMode')}</span><div class="pair">
+      <div class="seg"><button data-tr="rtu" class="${tcp ? '' : 'sel'}">RTU</button><button data-tr="tcp" class="${tcp ? 'sel' : ''}">TCP</button></div>
+      <select data-cr class="${s.crazy ? 'crazy' : ''}" title="${t('mode')}"><option value="0"${s.crazy ? '' : ' selected'}>${t('normal')}</option><option value="1"${s.crazy ? ' selected' : ''}>${t('crazy')}</option></select></div></div>
+    <div class="field"><span>${t('address')}</span><div class="addr">
+      <input type="number" min="1" max="247" data-f="unit" value="${s.unit}" title="${t('address')}">
+      ${tcp ? `<span>${t('tcpPort')}</span><input type="number" min="1" max="65535" data-f="listen" value="${esc(tport)}">`
+            : `<span>${t('port')}</span><select data-f="port"${s.pty ? ' disabled' : ''}>${ports}</select>`}</div></div>
+    ${tcp ? '' : `<div class="field"><span>${t('baudFmt')}</span><div class="pair">
          <select data-f="baud" title="${t('baud')}">${bauds}</select>
-         <select data-f="mode" title="${t('format')}">${fmts}</select></div></div>`}
-    <div class="field"><span>${t('mode')}</span><div class="seg">
-      <button data-cr="0" class="${s.crazy ? '' : 'sel'}">${t('normal')}</button><button data-cr="1" class="${s.crazy ? 'sel crazy' : ''}">${t('crazy')}</button></div></div>`;
+         <select data-f="mode" title="${t('format')}">${fmts}</select></div></div>`}`;
 }
 
 function stateLine(s) {
@@ -392,7 +397,7 @@ function wire(el, id) {
   });
   el.querySelectorAll('[data-f="unit"], [data-f="listen"]').forEach(i => i.onkeydown = e => { if (e.key === 'Enter') i.blur(); });
   el.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => update(id, {transport: b.dataset.tr}));
-  el.querySelectorAll('[data-cr]').forEach(b => b.onclick = () => update(id, {crazy: b.dataset.cr === '1'}));
+  el.querySelectorAll('[data-cr]').forEach(b => b.onchange = () => update(id, {crazy: b.value === '1'}));
   el.querySelector('[data-act="del"]').onclick = () => removeSensor(id);
   el.querySelector('[data-act="toggle"]').onclick = () => update(id, {stopped: !S.sensors.find(x => x.id === id)?.stopped});
   el.querySelector('[data-act="regs"]').onclick = () => selectSensor(S.sel === id ? null : id);
