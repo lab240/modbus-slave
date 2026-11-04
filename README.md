@@ -140,7 +140,10 @@ modbus-slave line-test send   -p 0 -p 1 -p 2 -p 3 -b 57600 --secs 3
 
 `--pattern tokens` (default) sends `<P1 00042>`: the listener tells which port reached it and how many bytes are
 wrong. `--pattern bytes` sends `00..FF` and counts flipped bits — a line too slow for the baud rate turns a lone 0
-after 1s into 1 (`03` arrives as `07`). A real run, 915 m of twisted pair at 115200:
+after 1s into 1 (`03` arrives as `07`). `--burst 8 --pause 20` sends short bursts with silence between them, like
+Modbus frames. **Check a speed with `--pattern bytes`**: tokens contain only digits and brackets and miss the bit
+combinations that a long line distorts first (on 915 m at 230400 tokens were clean while `C4 4F` arrived as `C4 FE`).
+A real run, 915 m of twisted pair at 115200 without a terminator at the far end:
 
 ```
   0              30730 bytes  30597 bytes off the counter; first 64 bytes: bits 0->1 33, 1->0 0

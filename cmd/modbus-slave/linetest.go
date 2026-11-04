@@ -5,6 +5,7 @@ package main
 //
 //	modbus-slave line-test listen -p 0 -p 1 -p 2 -p 3 -b 57600 --secs 6     # start first
 //	modbus-slave line-test send   -p 0 -p 1 -p 2 -p 3 -b 57600 --secs 3
+//	... send --burst 10 --pause 20     short bursts after silence, like Modbus frames (the line idles between them)
 //
 // tokens (default): "<P1 00042>" = sending port + counter; the listener tells which port reached it
 // (crossed pairs) and how many bytes are wrong. bytes: 00..FF repeated; the listener counts the bits
@@ -34,9 +35,11 @@ func lineTest(args []string) int {
 	baud := fs.Int("b", 9600, "baud rate")
 	mode := fs.String("o", "8N1", "port mode")
 	secs := fs.Float64("secs", 3, "send: how long to send; listen: how long to listen (start the listener first, give it 3 s more)")
+	burst := fs.Int("burst", 0, "send: bytes per burst, then --pause of silence (0 = one continuous stream); tokens: rounded to 10")
+	pause := fs.Float64("pause", 20, "send: silence between bursts, ms (like the gap between Modbus frames)")
 	pattern := fs.String("pattern", "tokens", "tokens (which port, how many wrong bytes) | bytes (00..FF, which bits flip)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: modbus-slave line-test send|listen -p <port> [-p ...] -b <baud> [--secs s] [--pattern tokens|bytes]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: modbus-slave line-test send|listen -p <port> [-p ...] -b <baud> [--secs s] [--pattern tokens|bytes] [--burst n --pause ms]\n\n")
 		fs.PrintDefaults()
 	}
 	if len(args) == 0 || (args[0] != "send" && args[0] != "listen") {
@@ -71,7 +74,7 @@ func lineTest(args []string) int {
 	}
 	dur := time.Duration(*secs * float64(time.Second))
 	if role == "send" {
-		return send(conns, cfg, dur, *pattern)
+		return send(conns, cfg, dur, *pattern, *burst, time.Duration(*pause*float64(time.Millisecond)))
 	}
 	return listen(conns, ports, cfg, dur, *pattern)
 }
@@ -88,10 +91,18 @@ func payload(port int, n int, pattern string) []byte {
 	return b.Bytes()[:n]
 }
 
-func send(conns []serial.Conn, cfg serial.Config, dur time.Duration, pattern string) int {
+func send(conns []serial.Conn, cfg serial.Config, dur time.Duration, pattern string, burst int, pause time.Duration) int {
 	n := int(float64(cfg.Baud) / float64(cfg.BitsPerChar()) * dur.Seconds())
 	if pattern == "tokens" {
 		n -= n % 10
+		if burst > 0 {
+			burst = max(10, burst-burst%10)
+		}
+	}
+	if burst > 0 {
+		// bursts take longer than a stream: keep about the same time, fewer bytes
+		perBurst := time.Duration(float64(burst*cfg.BitsPerChar())/float64(cfg.Baud)*float64(time.Second)) + pause
+		n = min(n, int(dur/perBurst)*burst)
 	}
 	var wg sync.WaitGroup
 	t0 := time.Now()
@@ -99,12 +110,25 @@ func send(conns []serial.Conn, cfg serial.Config, dur time.Duration, pattern str
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c.Write(payload(i, n, pattern))
-			c.Drain()
+			data := payload(i, n, pattern)
+			if burst <= 0 {
+				c.Write(data)
+				c.Drain()
+				return
+			}
+			for k := 0; k < len(data); k += burst {
+				c.Write(data[k:min(k+burst, len(data))])
+				c.Drain()
+				time.Sleep(pause)
+			}
 		}()
 	}
 	wg.Wait()
-	fmt.Printf("sent %d bytes x %d ports at %s in %.1f s\n", n, len(conns), cfg, time.Since(t0).Seconds())
+	how := "one stream"
+	if burst > 0 {
+		how = fmt.Sprintf("bursts of %d bytes, %v pauses", burst, pause)
+	}
+	fmt.Printf("sent %d bytes x %d ports at %s in %.1f s (%s)\n", n, len(conns), cfg, time.Since(t0).Seconds(), how)
 	return 0
 }
 
