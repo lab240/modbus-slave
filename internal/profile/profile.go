@@ -38,8 +38,9 @@ type Profile struct {
 
 // Reg is a block of registers with one value source.
 type Reg struct {
-	Addr  int `yaml:"addr"`
-	Count int `yaml:"count"` // number of values (a 32-bit value takes 2 registers); default 1
+	Addr  int    `yaml:"addr"`
+	Name  string `yaml:"name"`  // shown by the API and the web page
+	Count int    `yaml:"count"` // number of values (a 32-bit value takes 2 registers); default 1
 
 	// const: value / values / string; base + line*line_step + unit*unit_step + i*index_step is added to it
 	Value     *float64  `yaml:"value"`
@@ -128,6 +129,25 @@ func Parse(data []byte) (*Profile, error) {
 		return nil, err
 	}
 	return &p, p.check()
+}
+
+// Kind tells where the values of the block come from, for the API and the web page.
+func (r *Reg) Kind() string {
+	switch {
+	case r.String != nil:
+		return "string"
+	case r.Wave != nil:
+		return "wave " + r.Wave.Shape
+	case r.Random:
+		return "random"
+	case r.File != "":
+		return "file " + r.File
+	case r.Special != "":
+		return "special " + r.Special
+	case len(r.Specials) > 0:
+		return "specials " + strings.Join(r.Specials, ",")
+	}
+	return "const"
 }
 
 func (r *Reg) width() int {

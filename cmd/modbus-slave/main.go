@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -15,17 +17,14 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/lab240/modbus-slave/internal/api"
-	"github.com/lab240/modbus-slave/internal/device"
+	"github.com/lab240/modbus-slave/internal/fleet"
 	"github.com/lab240/modbus-slave/internal/profile"
-	"github.com/lab240/modbus-slave/internal/rtu"
 	"github.com/lab240/modbus-slave/internal/serial"
 	"github.com/lab240/modbus-slave/internal/server"
-	"github.com/lab240/modbus-slave/internal/source"
 )
 
 var version = "2.0.0-dev"
@@ -37,6 +36,8 @@ func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 
 type opts struct {
 	ports, ptys, files multi
+	tcps               multi
+	state              string
 	baud               int
 	mode               string
 	count              int
@@ -66,6 +67,8 @@ func main() {
 	var o opts
 	fs := flag.NewFlagSet("modbus-slave", flag.ExitOnError)
 	fs.Var(&o.ports, "p", "serial port: /dev/ttyUSB0, /dev/ttyS7, or FT4232H channel 0..3 (A..D, survives re-plug); repeat for several lines")
+	fs.Var(&o.tcps, "tcp", "serve Modbus TCP on this address (:502, 0.0.0.0:1502) instead of a serial port; repeatable")
+	fs.StringVar(&o.state, "state", "", "file that keeps the line settings changed over the API (port, speed, parity, TCP) over a restart")
 	fs.Var(&o.ptys, "pty", "serve on a new pty and point this symlink at it (no hardware, for tests); repeatable")
 	fs.IntVar(&o.baud, "b", 19200, "baud rate, any value the UART can do (1200 .. 4000000)")
 	fs.StringVar(&o.mode, "o", "8N1", "port mode: 8N1 8E1 8O1 7E1 8N2")
@@ -95,7 +98,7 @@ func main() {
 	fs.BoolVar(&o.stat, "s", false, "show daemon status")
 	fs.BoolVar(&o.showVersion, "version", false, "print version")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "modbus-slave %s — Modbus RTU slave emulator\n\nUsage:\n  modbus-slave -p <port> -b <baud> [-a n] [-o 8N1] [-f id:file] [-t s] [options]\n  modbus-slave -k | -s\n  modbus-slave line-test send|listen -p <port> [-p ...] -b <baud>   (raw line test, see line-test -h)\n\nOptions:\n", version)
+		fmt.Fprintf(os.Stderr, "modbus-slave %s — Modbus RTU / TCP slave emulator\n\nUsage:\n  modbus-slave -p <port> -b <baud> [-a n] [-o 8N1] [-f id:file] [-t s] [options]\n  modbus-slave --tcp :502 [-a n] [options]\n  modbus-slave -k | -s\n  modbus-slave line-test send|listen -p <port> [-p ...] -b <baud>   (raw line test, see line-test -h)\n\nOptions:\n", version)
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -113,7 +116,7 @@ func main() {
 	if o.kill || o.stat {
 		os.Exit(daemonControl(o.kill))
 	}
-	if len(o.ports) == 0 && len(o.ptys) == 0 {
+	if len(o.ports) == 0 && len(o.ptys) == 0 && len(o.tcps) == 0 {
 		fs.Usage()
 		os.Exit(2)
 	}
@@ -203,67 +206,78 @@ func run(o opts) error {
 	if err != nil {
 		return err
 	}
-	var prof *profile.Profile
-	if o.profile != "generic" {
-		if prof, err = profile.Load(o.profile); err != nil {
+	if o.profile != fleet.Generic {
+		if _, err = profile.Load(o.profile); err != nil {
 			return err
 		}
 		if len(files) > 0 {
 			return fmt.Errorf("-f works with --profile generic; in a YAML profile use file: in the register map")
 		}
 	}
-	env := profile.Env{Baud: cfg.Baud, Parity: cfg.Parity, Seed: o.seed, Start: time.Now(), Files: &profile.Files{}}
-	gap := time.Duration(o.gap * float64(time.Millisecond))
-	if gap <= 0 {
-		gap = rtu.T35(cfg.Baud, cfg.BitsPerChar())
-	}
-	f := server.Faults{
-		Delay: ms(o.delay), Jitter: ms(o.jitter), Drop: o.drop, Exc: o.exc, BadCRC: o.badcrc,
-		Frag: o.frag, FragGap: ms(o.fragGap), Echo: o.echo,
-	}
-	specs := append(append([]string{}, o.ports...), o.ptys...)
-	var lines []*server.Line
+	// the sensors of the command line: every unit on every port
+	var sensors []fleet.Sensor
+	specs := append(append(append([]string{}, o.ports...), o.ptys...), o.tcps...)
 	for i, spec := range specs {
-		var devs []*device.Device
 		for _, u := range units {
-			if prof != nil {
-				e := env
-				e.Line, e.Unit = i, u
-				devs = append(devs, profile.Build(prof, e))
-				continue
+			s := fleet.Sensor{Profile: o.profile, Unit: int(u), Line: i, Transport: "rtu", Port: spec, Baud: cfg.Baud, Mode: o.mode}
+			switch {
+			case i >= len(o.ports)+len(o.ptys):
+				s.Transport, s.Port, s.Listen = "tcp", "", spec
+			case i >= len(o.ports):
+				s.Pty = true
 			}
-			var src source.Block = source.NewRandom(o.seed + uint64(i)*1000 + uint64(u))
-			path := files[i][u]
-			if path == "" {
-				path = files[-1][u]
+			if path := cmp(files[i][u], files[-1][u]); path != "" {
+				s.File = path
 			}
-			if path != "" {
-				src = &source.File{Path: path, MaxAge: time.Duration(o.maxAge) * time.Second}
-			}
-			devs = append(devs, device.NewGeneric(u, o.regs, src))
+			sensors = append(sensors, s)
 		}
-		lines = append(lines, server.NewLine(i, spec, devs, f, gap, o.seed))
 	}
-	log.Printf("modbus-slave %s: %d line(s) %s, %s, profile %s, units %s", version, len(lines),
-		strings.Join(specs, ","), cfg, o.profile, unitList(units))
-	for _, l := range lines {
-		for _, d := range l.Devices {
-			if g, ok := d.Regs.(*device.Generic); ok {
-				log.Printf("  line %d id=%-3d src=%s", l.Index, d.Unit(), g.Src.Describe())
-			}
+	crazy := fleet.DefaultCrazy
+	if o.state != "" {
+		saved, c, err := loadState(o.state) // "stop" lasts until start or a restart of the service
+		switch {
+		case err != nil:
+			log.Printf("state %s: %v (ignored)", o.state, err)
+		case len(saved) > 0:
+			log.Printf("state %s: %d sensor(s) as saved (the ports and units of the command line are not used)", o.state, len(saved))
+			sensors = saved
 		}
+		if c != nil {
+			crazy = *c
+		}
+	}
+	opt := fleet.Options{
+		Normal: server.Faults{Delay: ms(o.delay), Jitter: ms(o.jitter), Drop: o.drop, Exc: o.exc, BadCRC: o.badcrc,
+			Frag: o.frag, FragGap: ms(o.fragGap), Echo: o.echo},
+		Crazy:       crazy,
+		Gap:         ms(o.gap), // 0 = t3.5 of the baud rate
+		Latency:     o.latency,
+		Regs:        o.regs,
+		MaxAge:      time.Duration(o.maxAge) * time.Second,
+		Seed:        o.seed,
+		ProfileDirs: []string{"/etc/modbus-slave/profiles", "/usr/share/modbus-slave/profiles"},
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	var wg sync.WaitGroup
-	for i, l := range lines {
-		wg.Add(1)
-		isPty := i >= len(o.ports)
-		go func() { defer wg.Done(); keepServing(ctx, l, cfg, o.latency, isPty) }()
+	log.Printf("modbus-slave %s: %d sensor(s)", version, len(sensors))
+	fl, err := fleet.New(ctx, opt, sensors)
+	if err != nil {
+		return err
+	}
+	if o.state != "" {
+		fl.Save = func(ss []fleet.Sensor, c server.Faults, _ bool) error { return saveState(o.state, ss, c) }
+	}
+
+	for _, s := range fl.List() {
+		desc := ""
+		if s.File != "" {
+			desc = ", values from " + s.File
+		}
+		log.Printf("  sensor %d: %s, address %d, %s%s", s.ID, s.Profile, s.Unit, settingsOf(s), desc)
 	}
 	if o.report > 0 {
-		go reporter(ctx, lines, time.Duration(o.report*float64(time.Second)))
+		go reporter(ctx, fl.Lines, time.Duration(o.report*float64(time.Second)))
 	}
 	if o.apiAddr != "" {
 		token := ""
@@ -278,19 +292,68 @@ func run(o opts) error {
 		if err != nil {
 			return err
 		}
-		a := api.New(api.Info{Version: version, Profile: o.profile, Mode: cfg.String(), Baud: cfg.Baud}, lines, token)
+		a := api.New(api.Info{Version: version}, fl, o.regs, token)
 		go a.Serve(ln)
 		go func() { <-ctx.Done(); ln.Close() }()
-		log.Printf("api on %s", o.apiAddr)
+		log.Printf("api and web page on %s", o.apiAddr)
 	}
-	wg.Wait()
-	for i, l := range lines {
-		if i >= len(o.ports) {
-			os.Remove(l.Spec)
-		}
-	}
+	<-ctx.Done()
+	fl.Wait()
 	log.Printf("stopped")
 	return nil
+}
+
+func cmp(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func settingsOf(s fleet.Sensor) string {
+	if s.Transport == "tcp" {
+		return "Modbus TCP " + s.Listen
+	}
+	return fmt.Sprintf("RTU %s %d %s", s.Port, s.Baud, s.Mode)
+}
+
+// state file: the sensors and the crazy mode, as changed on the web page or over the API.
+type stateFile struct {
+	Sensors []fleet.Sensor `json:"sensors"`
+	Crazy   *api.Faults    `json:"crazy,omitempty"`
+}
+
+func loadState(path string) ([]fleet.Sensor, *server.Faults, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var sf stateFile
+	if err := json.Unmarshal(b, &sf); err != nil {
+		return nil, nil, err
+	}
+	var c *server.Faults
+	if sf.Crazy != nil && sf.Crazy.Check() == nil {
+		f := sf.Crazy.ToFaults()
+		c = &f
+	}
+	return sf.Sensors, c, nil
+}
+
+func saveState(path string, ss []fleet.Sensor, crazy server.Faults) error {
+	c := api.FaultsOf(crazy)
+	b, err := json.MarshalIndent(stateFile{Sensors: ss, Crazy: &c}, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func ms(v float64) time.Duration { return time.Duration(v * float64(time.Millisecond)) }
@@ -306,49 +369,9 @@ func unitList(u []byte) string {
 	return strings.Join(s, ",")
 }
 
-// keepServing opens the line and serves it; when the port fails (USB re-plug) it waits and reopens.
-func keepServing(ctx context.Context, l *server.Line, cfg serial.Config, latency int, isPty bool) {
-	lastErr := ""
-	for ctx.Err() == nil {
-		var c serial.Conn
-		var err error
-		if isPty {
-			c, err = serial.OpenPty(l.Spec)
-		} else if dev := serial.Resolve(l.Spec); dev == "" {
-			err = fmt.Errorf("channel %s not present", l.Spec)
-		} else {
-			if latency > 0 {
-				serial.SetLatency(dev, latency) // a re-plugged FTDI starts again at 16 ms
-			}
-			c, err = serial.Open(dev, cfg)
-		}
-		if err == nil {
-			if lastErr != "" {
-				log.Printf("line %d (%s): back on %s", l.Index, l.Spec, c.Name())
-				lastErr = ""
-			} else {
-				log.Printf("line %d: serving %s", l.Index, c.Name())
-			}
-			err = l.Serve(ctx, c)
-			c.Close()
-			if ctx.Err() != nil {
-				return
-			}
-		}
-		if err.Error() != lastErr { // log once per new error, not every second
-			log.Printf("line %d (%s): %v, waiting", l.Index, l.Spec, err)
-			lastErr = err.Error()
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(time.Second):
-		}
-	}
-}
-
-func reporter(ctx context.Context, lines []*server.Line, every time.Duration) {
+func reporter(ctx context.Context, linesOf func() []*server.Line, every time.Duration) {
 	t0 := time.Now()
-	prev := make([]server.Snapshot, len(lines))
+	prev := map[*server.Line]server.Snapshot{} // a line restarted with new settings starts again from 0
 	tk := time.NewTicker(every)
 	defer tk.Stop()
 	for {
@@ -358,9 +381,11 @@ func reporter(ctx context.Context, lines []*server.Line, every time.Duration) {
 		case <-tk.C:
 		}
 		var parts []string
-		for i, l := range lines {
+		lines := linesOf()
+		seen := map[*server.Line]server.Snapshot{}
+		for _, l := range lines {
 			s := l.Stats.Snapshot()
-			p := fmt.Sprintf("line %d: %d ans %.0f/s", l.Index, s.Ans, float64(s.Ans-prev[i].Ans)/every.Seconds())
+			p := fmt.Sprintf("line %d: %d ans %.0f/s", l.Index, s.Ans, float64(s.Ans-prev[l].Ans)/every.Seconds())
 			var bad []string
 			for _, kv := range []struct {
 				k string
@@ -374,8 +399,9 @@ func reporter(ctx context.Context, lines []*server.Line, every time.Duration) {
 				p += " (" + strings.Join(bad, ", ") + ")"
 			}
 			parts = append(parts, p)
-			prev[i] = s
+			seen[l] = s
 		}
+		prev = seen
 		log.Printf("[%6.0fs] %s", time.Since(t0).Seconds(), strings.Join(parts, "  "))
 	}
 }

@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>modbus-slave</title>
+<style>
+:root {
+  --bg: #f4f5f8; --card: #ffffff; --text: #1d2330; --muted: #687187; --line: #e1e4ea; --soft: #f0f2f6;
+  --accent: #2563eb; --ok: #15803d; --bad: #c2410c; --warn: #a16207; --crazy: #b4235a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --card: #1b2029; --text: #e3e7ee; --muted: #8b94a7; --line: #2b323e; --soft: #232a35;
+    --accent: #6c9cff; --ok: #4ade80; --bad: #fb923c; --warn: #facc15; --crazy: #f472b6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding: 14px 20px; background: var(--card); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 18px; margin: 0; }
+header .meta { color: var(--muted); }
+header { align-items: center; }
+.svc { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; border: 1px solid currentColor; }
+.pill.on { color: var(--ok); } .pill.off { color: var(--bad); }
+.svc .btn:disabled { opacity: .45; cursor: default; border-color: var(--line); }
+.svc .auto { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.tile.off .ctl, .tile.off .vals { opacity: .55; }
+.icon.play { color: var(--ok); } .icon.pause { color: var(--muted); }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; flex: none; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); }
+.dot.polled { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.tile { cursor: pointer; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-content: start; min-width: 0; overflow: hidden; }
+.tile .ctl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.tile.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tile:not(.sel):hover { border-color: var(--muted); }
+.tile select, .tile input { cursor: auto; }
+.tile.crazy { border-top: 3px solid var(--crazy); }
+.tile .top { display: flex; align-items: center; gap: 8px; }
+.tile .top h2 { font-size: 16px; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .top h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
+.icon { border: none; background: none; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 6px; font-size: 15px; }
+.icon:hover { background: var(--soft); color: var(--text); }
+.field { display: grid; grid-template-columns: 82px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.field > span { color: var(--muted); font-size: 12px; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; min-width: 0; }
+.pair label { display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
+select { text-overflow: ellipsis; }
+select, input[type=number], input[type=text], input[type=password] {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px; width: 100%; min-width: 0; }
+select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; border: none; background: var(--bg); color: var(--text); padding: 5px 6px; cursor: pointer;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.sel { background: var(--accent); color: #fff; }
+.seg button.sel.crazy { background: var(--crazy); }
+.live { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; }
+.values { display: flex; flex-wrap: wrap; gap: 4px 14px; min-width: 0; }
+.values .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.values .v small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+.values .l { font-size: 11px; color: var(--muted); }
+.state { font-size: 12px; color: var(--muted); display: flex; align-items: center; }
+.state.err { color: var(--bad); }
+.add { border: 2px dashed var(--line); border-radius: 12px; background: none; color: var(--muted); font: inherit; font-size: 15px; cursor: pointer; min-height: 160px; }
+.add:hover { border-color: var(--accent); color: var(--accent); }
+
+button.btn { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 7px; padding: 4px 10px; }
+button.btn:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.card h3 { font-size: 15px; margin: 0 0 4px; }
+.card .desc { color: var(--muted); margin: 0 0 12px; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+td.addr { white-space: nowrap; }
+td.raw { color: var(--muted); word-break: break-all; max-width: 280px; }
+td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
+.sub { color: var(--muted); font-size: 11px; font-weight: 400; }
+.rw { color: var(--accent); font-size: 11px; font-weight: 600; }
+.edit { display: flex; gap: 4px; margin-top: 4px; }
+.edit input { width: 110px; padding: 2px 6px; }
+.edit button { padding: 2px 8px; font-size: 12px; }
+.more { color: var(--accent); cursor: pointer; font-size: 12px; background: none; border: none; padding: 0; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+code { background: var(--soft); padding: 1px 5px; border-radius: 4px; }
+details.card > summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+details.card[open] > summary { margin-bottom: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px; align-items: end; }
+.grid label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+h4 { font-size: 13px; margin: 18px 0 8px; }
+.msg { position: fixed; right: 16px; bottom: 16px; max-width: 420px; padding: 10px 14px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0,0,0,.15); display: none; z-index: 2; }
+.msg.show { display: block; } .msg.err { border-color: var(--bad); color: var(--bad); }
+.tokenbar { display: none; } .tokenbar.show { display: block; border-color: var(--warn); }
+.tokenbar input { max-width: 340px; }
+.empty { color: var(--muted); }
+@media (max-width: 520px) { header { padding: 12px 16px; } main { padding: 12px 16px; } .tiles { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot" id="conn"></span>modbus-slave</h1>
+  <span class="meta" id="meta"></span>
+  <span class="svc" id="svc"></span>
+</header>
+<main>
+  <div class="card tokenbar" id="tokenbar">
+    <div data-t="tokenNeeded"></div>
+    <div class="row"><input type="password" id="token" autocomplete="off"><button class="btn primary" id="tokenSave" data-t="save"></button></div>
+  </div>
+  <section class="tiles" id="tiles"></section>
+  <section class="card" id="regs" hidden></section>
+  <details class="card" id="more">
+    <summary data-t="more"></summary>
+    <div id="crazyBox"></div>
+    <div id="busBox"></div>
+  </details>
+</main>
+<div class="msg" id="msg"></div>
+
+<script>
+'use strict';
+const RU = (navigator.language || '').toLowerCase().startsWith('ru');
+const T = {
+  sensor: ['Sensor', 'Датчик'], template: ['Template', 'Шаблон'], address: ['Address', 'Адрес'], link: ['Link', 'Связь'],
+  port: ['Port', 'Порт'], baud: ['Speed', 'Скорость'], baudFmt: ['Speed, parity', 'Скорость, чётность'], format: ['Parity', 'Чётность'], tcpPort: ['TCP port', 'TCP-порт'],
+  mode: ['Mode', 'Режим'], normal: ['Normal', 'Нормальный'], crazy: ['Crazy', 'Психованный'],
+  add: ['+ Add a sensor', '+ Добавить датчик'], remove: ['Remove', 'Удалить'], registers: ['Registers', 'Регистры'],
+  confirmRemove: ['Remove sensor', 'Удалить датчик'], other: ['other…', 'другой…'],
+  waiting: ['open, waiting for the master', 'открыт, ждёт запросов мастера'], polled: ['polled', 'опрашивается'],
+  openLast: ['open, last request', 'открыт, последний запрос'], served: ['requests', 'запросов'],
+  ago: ['s ago', 'с назад'], notOpen: ['not open', 'не открыт'], starting: ['starting…', 'запуск…'],
+  fN: ['none · 8N1', 'нет · 8N1'], fE: ['even · 8E1', 'чёт · 8E1'], fO: ['odd · 8O1', 'нечёт · 8O1'],
+  fN2: ['none, 2 stop · 8N2', 'нет, 2 стопа · 8N2'], f7E: ['7 bits even · 7E1', '7 бит, чёт · 7E1'], f7O: ['7 bits odd · 7O1', '7 бит, нечёт · 7O1'],
+  regsOf: ['Registers of sensor', 'Регистры датчика'], addr: ['Address', 'Адрес'], name: ['Name', 'Название'],
+  value: ['Value', 'Значение'], raw: ['hex', 'hex'], access: ['Access', 'Доступ'], ro: ['read', 'чтение'], rwAcc: ['read, write', 'чтение, запись'],
+  write: ['Write', 'Записать'], showAll: ['show all', 'показать все'], showLess: ['show less', 'свернуть'],
+  funcs: ['Functions', 'Функции'], fc3: ['read holding', 'чтение holding'], fc4: ['read input', 'чтение input'],
+  fc6: ['write one', 'запись одного'], fc8: ['diagnostics', 'диагностика'], fc16: ['write several', 'запись нескольких'],
+  fc4same: ['FC 4 reads the same map as FC 3.', 'FC 4 читает ту же карту, что и FC 3.'],
+  zeroBased: ['Addresses from 0 (as in napiconfig); mbpoll counts from 1.', 'Адреса с нуля (как в napiconfig); в mbpoll на 1 больше.'],
+  howto: ['Try', 'Проверка'], masterPort: ['&lt;port of the master&gt;', '&lt;порт мастера&gt;'],
+  more: ['More settings', 'Дополнительно'],
+  crazyTitle: ['What the crazy mode does', 'Что делает психованный режим'],
+  crazyDesc: ['For every sensor in the crazy mode. Saved over a restart.', 'Для всех датчиков в психованном режиме. Сохраняется после перезапуска.'],
+  delay: ['answer delay, ms', 'задержка ответа, мс'], jitter: ['+ random up to, ms', '+ случайно до, мс'],
+  dropP: ['no answer, %', 'нет ответа, %'], excP: ['exception 4, %', 'исключение 4, %'], badcrcP: ['broken CRC, %', 'битый CRC, %'],
+  frag: ['answer in N pieces', 'ответ кусками, шт'], fragGap: ['gap between pieces, ms', 'пауза между кусками, мс'],
+  apply: ['Apply', 'Применить'], applied: ['Applied', 'Применено'], wrote: ['Written', 'Записано'],
+  buses: ['Buses (sensors on one port share it)', 'Шины (датчики на одном порту — одна шина)'],
+  bus: ['Bus', 'Шина'], sensors: ['Sensors', 'Датчики'], req: ['requests', 'запросов'], ans: ['answers', 'ответов'],
+  errs: ['errors', 'ошибок'], foreign: ['other units', 'чужим адресам'],
+  alsoChanged: ['speed and parity changed on the same port for sensors', 'скорость и чётность изменены и у датчиков на этом порту'],
+  tokenNeeded: ['The API needs a token (the file given with --api-token-file).', 'API требует токен (файл из --api-token-file).'],
+  save: ['Save', 'Сохранить'], noConn: ['No connection to the emulator', 'Нет связи с эмулятором'], uptime: ['up', 'работает'],
+  numbers: ['numbers separated by commas', 'числа через запятую'], noSensors: ['No sensors yet.', 'Датчиков пока нет.'],
+  virtual: ['Virtual (random)', 'Виртуальный (случайные)'],
+  running: ['Emulation is running', 'Эмуляция работает'], stoppedAll: ['Emulation is stopped', 'Эмуляция остановлена'],
+  svcRunning: ['Service is running', 'Сервис работает'], svcStopped: ['Service is stopped', 'Сервис остановлен'],
+  svcStart: ['▶ Start the service', '▶ Запустить сервис'], svcStop: ['■ Stop the service', '■ Остановить сервис'],
+  autostart: ['start with the system', 'запускать при старте системы'],
+  confirmNoAuto: ['After a reboot the service will not start, and this page will not open. Start it by hand: systemctl start modbus-slave. Turn it off?',
+                  'После перезагрузки сервис не запустится, и эта страница не откроется. Запустить вручную: systemctl start modbus-slave. Выключить?'],
+  confirmStopAll: ['Stop the service? Every sensor stops answering and the ports are closed; this page stays, so you can start it again.',
+                   'Остановить сервис? Все датчики перестанут отвечать, порты закроются; эта страница останется, чтобы можно было запустить снова.'],
+  nSensors: ['sensors', 'датчиков'], nBuses: ['buses open', 'шин открыто'],
+  stopOne: ['Stop this sensor', 'Остановить датчик'], startOne: ['Start this sensor', 'Запустить датчик'],
+  stoppedOne: ['stopped: does not answer', 'остановлен: не отвечает'], stoppedByAll: ['the emulation is stopped', 'эмуляция остановлена'],
+};
+const t = k => (T[k] || [k, k])[RU ? 1 : 0];
+document.documentElement.lang = RU ? 'ru' : 'en';
+document.querySelectorAll('[data-t]').forEach(e => e.textContent = t(e.dataset.t));
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const hex = (v, n = 4) => '0x' + v.toString(16).toUpperCase().padStart(n, '0');
+const num = v => v.toLocaleString(RU ? 'ru-RU' : 'en-US');
+const BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+const FORMATS = [['8N1', 'fN'], ['8E1', 'fE'], ['8O1', 'fO'], ['8N2', 'fN2'], ['7E1', 'f7E'], ['7O1', 'f7O']];
+
+let token = '';
+try { token = localStorage.getItem('modbus-slave-token') || ''; } catch (e) {}
+const S = { running: true, sensors: [], templates: [], ports: [], maps: {}, sel: null, nodes: {}, fc: 3, open: {}, busy: false };
+
+function toast(text, err) {
+  const m = $('msg'); m.textContent = text; m.className = 'msg show' + (err ? ' err' : '');
+  clearTimeout(toast.t); toast.t = setTimeout(() => m.className = 'msg', err ? 6000 : 2200);
+}
+
+async function api(path, opts = {}) {
+  const headers = {'Content-Type': 'application/json'};
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const r = await fetch('/api/v1' + path, {...opts, headers});
+  if (r.status === 401) { $('tokenbar').classList.add('show'); throw new Error('401'); }
+  if (r.status === 204) return {};
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.statusText);
+  return body;
+}
+const quiet = e => { if (e.message !== '401') toast(e.message, true); };
+
+$('tokenSave').onclick = () => {
+  token = $('token').value.trim();
+  try { localStorage.setItem('modbus-slave-token', token); } catch (e) {}
+  $('tokenbar').classList.remove('show');
+  boot();
+};
+
+// ---------- templates and register maps ----------
+const tmplTitle = name => { const x = S.templates.find(t => t.name === name); return x ? (x.name === 'generic' ? t('virtual') : x.title) : name; };
+
+async function mapOf(s) {
+  const key = s.profile;
+  if (!S.maps[key]) S.maps[key] = api(`/sensors/${s.id}/map`).catch(e => { delete S.maps[key]; throw e; });
+  return S.maps[key];
+}
+
+// "temperature, °C x10 (+ correction 0x04FF)" -> {label: temperature, unit: °C, div: 10}
+function measure(b) {
+  const name = b.name || '';
+  const m = name.match(/^([^,(]+)(?:,\s*([^\s(]+)?\s*x(\d+))?/i);
+  return {label: (m ? m[1] : name).trim(), unit: m && m[2] ? m[2] : '', div: m && m[3] ? +m[3] : 1};
+}
+const isMeasure = b => /^(wave|file|random)/.test(b.source) && b.type !== 'string';
+
+const WIDTH = {uint32: 2, int32: 2, float32: 2};
+function decodeVals(b, regs) {
+  if (b.type === 'string') {
+    let s = '';
+    for (const r of regs) s += String.fromCharCode(r >> 8, r & 0xFF);
+    return [JSON.stringify(s.replace(/\0+$/, ''))];
+  }
+  const w = WIDTH[b.type] || 1, out = [];
+  for (let i = 0; i + w <= regs.length; i += w) {
+    let v;
+    if (w === 1) v = b.type === 'int16' && regs[i] >= 0x8000 ? regs[i] - 0x10000 : regs[i];
+    else {
+      const [hi, lo] = b.word_order === 'little' ? [regs[i + 1], regs[i]] : [regs[i], regs[i + 1]];
+      const dv = new DataView(new ArrayBuffer(4)); dv.setUint16(0, hi); dv.setUint16(2, lo);
+      v = b.type === 'float32' ? +dv.getFloat32(0).toPrecision(7) : b.type === 'int32' ? dv.getInt32(0) : dv.getUint32(0);
+    }
+    if (b.scale) v = +(v / b.scale).toPrecision(7);
+    out.push(v);
+  }
+  return out;
+}
+function encodeVals(b, text) {
+  const vals = text.split(/[\s,;]+/).filter(Boolean).map(Number);
+  if (!vals.length || vals.some(isNaN)) throw new Error(t('numbers'));
+  const w = WIDTH[b.type] || 1, regs = [];
+  for (let v of vals) {
+    if (b.scale) v = v * b.scale;
+    if (w === 1) { regs.push(Math.round(v)); continue; }
+    const dv = new DataView(new ArrayBuffer(4));
+    if (b.type === 'float32') dv.setFloat32(0, v); else if (b.type === 'int32') dv.setInt32(0, Math.round(v)); else dv.setUint32(0, Math.round(v));
+    const hi = dv.getUint16(0), lo = dv.getUint16(2);
+    if (b.word_order === 'little') regs.push(lo, hi); else regs.push(hi, lo);
+  }
+  return regs;
+}
+async function readBlock(id, b, n, fc = 3) {
+  const vals = [];
+  for (let a = 0; a < n; a += 125) {
+    const r = await api(`/sensors/${id}/registers?addr=${b.addr + a}&count=${Math.min(125, n - a)}&fc=${fc}`);
+    vals.push(...r.values);
+  }
+  return vals;
+}
+
+// ---------- tiles ----------
+function portLabel(path) {
+  const p = S.ports.find(x => x.path === path || x.dev === path);
+  const info = p && p.info ? p.info.replace(/\bUSB\s+(to\s+)?(UART|Serial)(\s+(Converter|Port|Device|Bridge(\s+Controller)?))?\b/i, '').replace(/\s+/g, ' ').trim() : '';
+  return p ? p.dev.replace('/dev/', '') + (info ? ' · ' + info : '') : path;
+}
+
+function controls(s) {
+  const tcp = s.transport === 'tcp';
+  const tmpl = S.templates.map(x => `<option value="${esc(x.name)}"${x.name === s.profile ? ' selected' : ''}>${esc(x.name === 'generic' ? t('virtual') : x.title)}</option>`).join('');
+  const known = S.ports.some(p => p.path === s.port || p.dev === s.port);
+  const ports = S.ports.map(p => `<option value="${esc(p.path)}"${p.path === s.port || p.dev === s.port ? ' selected' : ''}>${esc(portLabel(p.path))}</option>`).join('') +
+    (known || !s.port ? '' : `<option value="${esc(s.port)}" selected>${esc(s.port)}</option>`) + `<option value="__other">${t('other')}</option>`;
+  const bauds = BAUDS.map(b => `<option${b === s.baud ? ' selected' : ''}>${b}</option>`).join('') +
+    (BAUDS.includes(s.baud) ? '' : `<option selected>${s.baud}</option>`) + `<option value="__other">${t('other')}</option>`;
+  const fmts = FORMATS.map(([m, k]) => `<option value="${m}"${m === s.mode ? ' selected' : ''}>${t(k)}</option>`).join('') +
+    (FORMATS.some(([m]) => m === s.mode) ? '' : `<option selected>${esc(s.mode)}</option>`);
+  const tport = (s.listen || ':502').split(':').pop();
+  return `<div class="top"><h2>${t('sensor')} ${s.id} <small>${esc(tmplTitle(s.profile))}</small></h2>
+      <button class="icon ${s.stopped ? 'play' : 'pause'}" data-act="toggle" title="${s.stopped ? t('startOne') : t('stopOne')}">${s.stopped ? '▶' : '⏸'}</button>
+      <button class="icon" data-act="regs" title="${t('registers')}">☰</button>
+      <button class="icon" data-act="del" title="${t('remove')}">✕</button></div>
+    <div class="field"><span>${t('template')}</span><select data-f="profile">${tmpl}</select></div>
+    <div class="field"><span>${t('address')}</span><input type="number" min="1" max="247" data-f="unit" value="${s.unit}"></div>
+    <div class="field"><span>${t('link')}</span><div class="seg">
+      <button data-tr="rtu" class="${tcp ? '' : 'sel'}">RTU</button><button data-tr="tcp" class="${tcp ? 'sel' : ''}">TCP</button></div></div>
+    ${tcp ? `<div class="field"><span>${t('tcpPort')}</span><input type="number" min="1" max="65535" data-f="listen" value="${esc(tport)}"></div>`
+    : `<div class="field"><span>${t('port')}</span><select data-f="port"${s.pty ? ' disabled' : ''}>${ports}</select></div>
+       <div class="field"><span>${t('baudFmt')}</span><div class="pair">
+         <select data-f="baud" title="${t('baud')}">${bauds}</select>
+         <select data-f="mode" title="${t('format')}">${fmts}</select></div></div>`}
+    <div class="field"><span>${t('mode')}</span><div class="seg">
+      <button data-cr="0" class="${s.crazy ? '' : 'sel'}">${t('normal')}</button><button data-cr="1" class="${s.crazy ? 'sel crazy' : ''}">${t('crazy')}</button></div></div>`;
+}
+
+function stateLine(s) {
+  if (s.stopped) return `<div class="state"><span class="dot"></span>${t('stoppedOne')}</div>`;
+  if (!S.running) return `<div class="state"><span class="dot"></span>${t('stoppedByAll')}</div>`;
+  const l = s.live;
+  if (!l) return `<div class="state"><span class="dot"></span>${t('starting')}</div>`;
+  if (!l.open) return `<div class="state err"><span class="dot bad"></span>${t('notOpen')}: ${esc(l.error || '')}</div>`;
+  if (l.last_ago_s < 0) return `<div class="state"><span class="dot ok"></span>${t('waiting')}</div>`;
+  const ago = l.last_ago_s < 10 ? l.last_ago_s.toFixed(1) : Math.round(l.last_ago_s);
+  if (l.last_ago_s < 10) return `<div class="state"><span class="dot polled"></span>${t('polled')}: ${num(l.served)} ${t('served')} · ${ago} ${t('ago')}</div>`;
+  return `<div class="state"><span class="dot ok"></span>${t('openLast')} ${ago} ${t('ago')} · ${num(l.served)} ${t('served')}</div>`;
+}
+
+async function liveValues(s) {
+  try {
+    const m = await mapOf(s);
+    let blocks = m.holding.filter(isMeasure).slice(0, 3);
+    if (s.profile === 'generic') blocks = [{...m.holding[0], regs: Math.min(4, m.holding[0].regs), name: 'R0..R3'}];
+    const got = Object.fromEntries((s.values || []).map(v => [v.addr, v.regs]));
+    const parts = blocks.filter(b => got[b.addr]).map(b => {
+      const vals = decodeVals(b, got[b.addr]);
+      if (s.profile === 'generic') return vals.map((v, i) => `<div><div class="v">${v}</div><div class="l">R${i}</div></div>`).join('');
+      const ms = measure(b);
+      const v = vals.length === 1 && ms.div > 1 ? (vals[0] / ms.div).toFixed(String(ms.div).length - 1) : vals.join(', ');
+      return `<div><div class="v">${esc(v)}<small>${esc(ms.unit)}</small></div><div class="l">${esc(ms.label)}</div></div>`;
+    });
+    return `<div class="values">${parts.join('')}</div>`;
+  } catch (e) { return ''; }
+}
+
+function renderTiles() {
+  const box = $('tiles');
+  if (!S.sensors.length && !box.querySelector('.empty')) box.insertAdjacentHTML('afterbegin', `<div class="card empty">${t('noSensors')}</div>`);
+  if (S.sensors.length) box.querySelector('.empty')?.remove();
+  const ids = new Set(S.sensors.map(s => s.id));
+  for (const id of Object.keys(S.nodes)) if (!ids.has(+id)) { S.nodes[id].el.remove(); delete S.nodes[id]; }
+  let addBtn = box.querySelector('.add');
+  if (!addBtn) {
+    box.insertAdjacentHTML('beforeend', `<button class="add">${t('add')}</button>`);
+    addBtn = box.querySelector('.add'); addBtn.onclick = addSensor;
+  }
+  for (const s of S.sensors) {
+    let n = S.nodes[s.id];
+    if (!n) {
+      const el = document.createElement('div');
+      el.className = 'tile';
+      el.innerHTML = '<div class="ctl"></div><div class="live"><div class="vals"></div><div class="st"></div></div>';
+      box.insertBefore(el, addBtn);
+      const id = s.id;
+      el.onclick = e => {   // a click anywhere on the tile but on a control picks it
+        if (e.target.closest('button, select, input, label, a')) return;
+        if (S.sel !== id) selectSensor(id);
+      };
+      n = S.nodes[s.id] = {el, ctlHtml: ''};
+    }
+    n.el.classList.toggle('sel', S.sel === s.id);
+    n.el.classList.toggle('crazy', !!s.crazy);
+    n.el.classList.toggle('off', !!s.stopped || !S.running);
+    const html = controls(s);
+    const focused = n.el.contains(document.activeElement) && document.activeElement.tagName !== 'BUTTON';
+    if (html !== n.ctlHtml && !focused) {   // re-render only when changed: an open drop-down stays open
+      n.ctlHtml = html;
+      n.el.querySelector('.ctl').innerHTML = html;
+      wire(n.el, s.id);
+    }
+    n.el.querySelector('.st').innerHTML = stateLine(s);
+  }
+}
+
+function wire(el, id) {
+  el.querySelectorAll('[data-f]').forEach(i => i.onchange = () => {
+    const f = i.dataset.f;
+    let v = i.value;
+    if (v === '__other') {
+      v = prompt(f === 'port' ? '/dev/ttyUSB0' : t('baud'), '');
+      if (!v) { renderTiles(); return; }
+    }
+    if (f === 'unit' || f === 'baud') v = parseInt(v, 10);
+    if (f === 'listen') v = ':' + v;
+    update(id, {[f]: v});
+  });
+  el.querySelectorAll('[data-f="unit"], [data-f="listen"]').forEach(i => i.onkeydown = e => { if (e.key === 'Enter') i.blur(); });
+  el.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => update(id, {transport: b.dataset.tr}));
+  el.querySelectorAll('[data-cr]').forEach(b => b.onclick = () => update(id, {crazy: b.dataset.cr === '1'}));
+  el.querySelector('[data-act="del"]').onclick = () => removeSensor(id);
+  el.querySelector('[data-act="toggle"]').onclick = () => update(id, {stopped: !S.sensors.find(x => x.id === id)?.stopped});
+  el.querySelector('[data-act="regs"]').onclick = () => selectSensor(S.sel === id ? null : id);
+}
+
+async function update(id, body) {
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  try {
+    const r = await api(`/sensors/${id}`, {method: 'PUT', body: JSON.stringify(body)});
+    if (r.also && r.also.length) toast(`${t('alsoChanged')}: ${r.also.join(', ')}`);
+    else toast(t('applied'));
+    if (body.profile) { renderRegs.last = ''; }
+  } catch (e) { quiet(e); }
+  for (const n of Object.values(S.nodes)) n.ctlHtml = '';   // show the server's view again
+  await refresh();
+}
+
+async function addSensor() {
+  const last = S.sensors[S.sensors.length - 1];
+  let body;
+  if (last) {
+    const same = S.sensors.filter(s => s.transport === last.transport && (last.transport === 'tcp' ? s.listen === last.listen : s.port === last.port));
+    const unit = Math.min(247, Math.max(...same.map(s => s.unit)) + 1);
+    body = {profile: 'generic', unit, transport: last.transport, port: last.port, baud: last.baud, mode: last.mode, listen: last.listen};
+  } else {
+    const p = S.ports.find(p => /USB|ACM/.test(p.dev)) || S.ports[0];
+    body = p ? {profile: 'generic', unit: 1, transport: 'rtu', port: p.path, baud: 9600, mode: '8N1'} : {profile: 'generic', unit: 1, transport: 'tcp', listen: ':502'};
+  }
+  try { const r = await api('/sensors', {method: 'POST', body: JSON.stringify(body)}); toast(t('applied')); await refresh(); selectSensor(r.id); }
+  catch (e) { quiet(e); }
+}
+
+async function removeSensor(id) {
+  if (!confirm(`${t('confirmRemove')} ${id}?`)) return;
+  try { await api(`/sensors/${id}`, {method: 'DELETE'}); if (S.sel === id) selectSensor(null); await refresh(); } catch (e) { quiet(e); }
+}
+
+// ---------- registers of the selected sensor ----------
+function selectSensor(id) {
+  S.sel = id; renderRegs.last = '';
+  $('regs').hidden = id === null;
+  renderTiles();
+  if (id !== null) { renderRegs(); $('regs').scrollIntoView({behavior: 'smooth', block: 'nearest'}); }
+}
+
+async function renderRegs() {
+  const s = S.sensors.find(x => x.id === S.sel);
+  if (!s) { $('regs').hidden = true; return; }
+  if (S.busy) return;
+  S.busy = true;
+  let m, rows;
+  const fc = S.fc;
+  try {
+    m = await mapOf(s);
+    const blocks = fc === 4 && m.input && m.input.length ? m.input : m.holding;
+    rows = await Promise.all(blocks.map(async b => {
+      const key = `${s.profile}:${fc}:${b.addr}`;
+      const n = b.type !== 'string' && b.regs > 8 && !S.open[key] ? 8 : b.regs;
+      try { return {b, key, n, vals: await readBlock(s.id, b, n, fc)}; } catch (e) { return {b, key, n, err: e.message}; }
+    }));
+  } catch (e) { S.busy = false; return; }
+  S.busy = false;
+  if (S.sel !== s.id || fc !== S.fc) return;
+  const a = document.activeElement;
+  if (a && a.dataset && a.dataset.wr) return;   // the user is typing a value
+  const hasFC4 = m.input && m.input.length;
+  const funcs = m.functions.map(f => `<code>${String(f).padStart(2, '0')}</code> ${t('fc' + f)}`).join(' · ');
+  const tmpl = S.templates.find(x => x.name === s.profile);
+  const t0 = m.holding.find(isMeasure) || m.holding[0];
+  const try0 = s.transport === 'tcp'
+    ? `mbpoll -m tcp -p ${esc(s.listen.split(':').pop())} -a ${s.unit} -r ${t0.addr + 1} -c ${Math.min(t0.regs, 2)} -1 ${esc(location.hostname)}`
+    : `mbpoll -m rtu -b ${s.baud} -d ${s.mode[0]} -P ${({N: 'none', E: 'even', O: 'odd'})[s.mode[1]]} -s ${s.mode[2]} -a ${s.unit} -r ${t0.addr + 1} -c ${Math.min(t0.regs, 2)} -1 ${t('masterPort')}`;
+  const html = `<h3>${t('regsOf')} ${s.id} · ${esc(tmplTitle(s.profile))} · ${t('address')} ${s.unit}
+      ${hasFC4 ? ` <span class="seg" style="display:inline-grid;vertical-align:middle"><button data-fc="3" class="${fc === 3 ? 'sel' : ''}">FC 3</button><button data-fc="4" class="${fc === 4 ? 'sel' : ''}">FC 4</button></span>` : ''}</h3>
+    <p class="desc">${esc(tmpl ? tmpl.description : m.description)}<br>${t('funcs')}: ${funcs}</p>
+    <div class="tablewrap"><table><thead><tr><th>${t('addr')}</th><th>${t('name')}</th><th>${t('value')}</th><th>${t('raw')}</th></tr></thead><tbody>
+    ${rows.map(({b, key, n, vals, err}) => {
+      const range = b.regs > 1 ? '–' + hex(b.addr + b.regs - 1) : '';
+      const more = b.type !== 'string' && b.regs > 8 ? ` <button class="more" data-more="${key}">${S.open[key] ? t('showLess') : t('showAll') + ' ' + b.regs}</button>` : '';
+      const value = err ? `<span style="color:var(--bad)">${esc(err)}</span>` : esc(decodeVals(b, vals).join(', ')) + (n < b.regs ? ' …' : '');
+      const edit = b.rw && !err && b.type !== 'string'
+        ? `<div class="edit"><input type="text" data-wr="${b.addr}" placeholder="${esc(decodeVals(b, vals.slice(0, WIDTH[b.type] || 1)).join(''))}"><button class="btn" data-wbtn="${b.addr}">${t('write')}</button></div>` : '';
+      return `<tr><td class="addr mono">${hex(b.addr)}${range}<div class="sub">${b.addr}${b.regs > 1 ? '–' + (b.addr + b.regs - 1) : ''}</div></td>
+        <td>${esc(b.name || '')}<div class="sub">${esc(b.type)} · ${esc(b.source)} · ${b.rw ? `<span class="rw">${t('rwAcc')}</span>` : t('ro')}</div></td>
+        <td class="val">${value}${more}${edit}</td>
+        <td class="raw mono">${err ? '' : vals.map(v => hex(v)).join(' ')}</td></tr>`;
+    }).join('')}</tbody></table></div>
+    ${hasFC4 ? '' : `<div class="hint">${t('fc4same')}</div>`}
+    <div class="hint">${t('zeroBased')} ${t('howto')}: <code>${try0}</code></div>`;
+  if (html === renderRegs.last) return;
+  renderRegs.last = html;
+  const box = $('regs');
+  box.innerHTML = html;
+  box.querySelectorAll('[data-fc]').forEach(c => c.onclick = () => { S.fc = +c.dataset.fc; renderRegs.last = ''; renderRegs(); });
+  box.querySelectorAll('[data-more]').forEach(c => c.onclick = () => { S.open[c.dataset.more] = !S.open[c.dataset.more]; renderRegs(); });
+  box.querySelectorAll('[data-wbtn]').forEach(b => b.onclick = () => writeBlock(s, m, +b.dataset.wbtn));
+  box.querySelectorAll('[data-wr]').forEach(i => i.onkeydown = e => { if (e.key === 'Enter') writeBlock(s, m, +i.dataset.wr); });
+}
+
+async function writeBlock(s, m, addr) {
+  const blocks = S.fc === 4 && m.input && m.input.length ? m.input : m.holding;
+  const b = blocks.find(x => x.addr === addr), input = document.querySelector(`[data-wr="${addr}"]`);
+  try {
+    await api(`/sensors/${s.id}/registers`, {method: 'PUT', body: JSON.stringify({addr, values: encodeVals(b, input.value)})});
+    input.value = ''; input.blur(); toast(t('wrote')); renderRegs();
+  } catch (e) { quiet(e); }
+}
+
+// ---------- more: crazy mode, buses ----------
+const CRAZY = [['delay_ms', 'delay', 1], ['jitter_ms', 'jitter', 1], ['drop', 'dropP', 100], ['exc', 'excP', 100],
+               ['badcrc', 'badcrcP', 100], ['frag', 'frag', 1], ['frag_gap_ms', 'fragGap', 1]];
+async function renderCrazy() {
+  try {
+    const c = await api('/crazy');
+    $('crazyBox').innerHTML = `<h4>${t('crazyTitle')}</h4><p class="desc">${t('crazyDesc')}</p>
+      <div class="grid">${CRAZY.map(([k, l, mul]) => `<label>${t(l)}<input type="number" min="0" step="any" id="c_${k}" value="${+(c[k] * mul).toFixed(3)}"></label>`).join('')}</div>
+      <div class="row"><button class="btn primary" id="cApply">${t('apply')}</button></div>`;
+    $('cApply').onclick = async () => {
+      const body = {};
+      for (const [k, , mul] of CRAZY) { const v = parseFloat($('c_' + k).value); if (!isNaN(v)) body[k] = k === 'frag' ? Math.round(v) : v / mul; }
+      try { await api('/crazy', {method: 'PUT', body: JSON.stringify(body)}); toast(t('applied')); } catch (e) { quiet(e); }
+    };
+  } catch (e) {}
+}
+
+function renderBuses(st) {
+  if (!$('more').open) return;
+  $('busBox').innerHTML = `<h4>${t('buses')}</h4><div class="tablewrap"><table><thead><tr><th>${t('bus')}</th><th>${t('port')}</th><th>${t('sensors')}</th>
+    <th>${t('req')}</th><th>${t('ans')}</th><th>${t('errs')}</th><th>${t('foreign')}</th></tr></thead><tbody>
+    ${st.lines.map(l => `<tr><td>${l.line}</td><td>${l.settings.transport === 'tcp' ? 'TCP ' + esc(l.settings.listen) : esc(portLabel(l.settings.port)) + ' · ' + l.settings.baud + ' ' + esc(l.settings.mode)}
+      ${l.open ? '' : `<div class="sub" style="color:var(--bad)">${esc(l.error || t('notOpen'))}</div>`}</td>
+      <td>${(l.units || []).join(', ')}</td><td>${num(l.stats.req)}</td><td>${num(l.stats.ans)}</td>
+      <td>${num(l.stats.resync + l.stats.drop + l.stats.badcrc + l.stats.exc)}</td><td>${num(l.stats.foreign)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+$('more').addEventListener('toggle', () => { if ($('more').open) renderCrazy(); });
+
+// ---------- the service ----------
+let svc = null;
+async function loadSvc() { try { svc = await api('/service'); } catch (e) {} }
+
+function renderSvc(st) {
+  const open = st.lines.filter(l => l.open).length;
+  const run = st.running;
+  const auto = svc && svc.unit && svc.enabled !== undefined
+    ? `<label class="auto"><input type="checkbox" id="autoBox"${svc.enabled ? ' checked' : ''}> ${t('autostart')}</label>` : '';
+  const html = `<span class="pill ${run ? 'on' : 'off'}"><span class="dot ${run ? 'ok' : 'bad'}"></span>${run ? t('svcRunning') : t('svcStopped')}${run ? ` · ${st.sensors} ${t('nSensors')} · ${open} ${t('nBuses')}` : ''}</span>
+    <button class="btn${run ? '' : ' primary'}" id="svcStart"${run ? ' disabled' : ''}>${t('svcStart')}</button>
+    <button class="btn" id="svcStop"${run ? '' : ' disabled'}>${t('svcStop')}</button>${auto}`;
+  if (html === renderSvc.last) return;
+  renderSvc.last = html;
+  $('svc').innerHTML = html;
+  const set = async body => {
+    try { svc = await api('/service', {method: 'PUT', body: JSON.stringify(body)}); toast(t('applied')); } catch (e) { quiet(e); await loadSvc(); }
+    for (const n of Object.values(S.nodes)) n.ctlHtml = '';
+    renderSvc.last = '';
+    await refresh();
+  };
+  $('svcStart').onclick = () => set({running: true});
+  $('svcStop').onclick = () => { if (confirm(t('confirmStopAll'))) set({running: false}); };
+  if ($('autoBox')) $('autoBox').onchange = e => {
+    if (!e.target.checked && !confirm(t('confirmNoAuto'))) { e.target.checked = true; return; }
+    set({enabled: e.target.checked});
+  };
+}
+
+// ---------- loop ----------
+function fmtUptime(s) {
+  s = Math.floor(s);
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return (d ? d + 'd ' : '') + (d || h ? h + 'h ' : '') + m + 'm';
+}
+
+let tick = 0;
+async function refresh() {
+  try {
+    const [sensors, st] = await Promise.all([api('/sensors?values=1'), api('/status')]);
+    S.sensors = sensors;
+    if (tick++ % 5 === 0) S.ports = await api('/ports').catch(() => S.ports);
+    $('meta').textContent = `${st.version} · ${t('uptime')} ${fmtUptime(st.uptime_s)}`;
+    S.running = st.running;
+    renderSvc(st);
+    $('conn').className = 'dot ok';
+    renderTiles();
+    renderBuses(st);
+    for (const s of S.sensors) {   // live values, one tile after another
+      const n = S.nodes[s.id];
+      if (n) liveValues(s).then(h => { if (n.valsHtml !== h) { n.valsHtml = h; n.el.querySelector('.vals').innerHTML = h; } });
+    }
+    if (S.sel !== null) renderRegs();
+  } catch (e) {
+    $('conn').className = 'dot bad';
+    if (e.message !== '401') $('meta').textContent = t('noConn');
+  }
+}
+
+async function boot() {
+  try { S.templates = await api('/templates'); S.ports = await api('/ports'); } catch (e) { if (e.message === '401') return; }
+  await loadSvc();
+  await refresh();
+}
+// one request for all tiles; with many sensors less often
+async function loop() {
+  if (!document.hidden) await refresh();
+  if (tick % 30 === 0) loadSvc();
+  setTimeout(loop, S.sensors.length > 30 ? 3000 : S.sensors.length > 10 ? 2000 : 1000);
+}
+boot().then(() => setTimeout(loop, 1000));
+</script>
+</body>
+</html>

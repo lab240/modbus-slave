@@ -19,6 +19,9 @@ type Env struct {
 	Unit   byte
 	Baud   int
 	Parity byte // 'N', 'E', 'O'
+	// Serial, when set, gives the current baud rate and parity (they can change while running);
+	// otherwise Baud and Parity are used.
+	Serial func() (baud int, parity byte)
 	Seed   uint64
 	Start  time.Time // t = 0 of the waves; shared by all devices of a run
 	Files  *Files    // shared file sources (one per path)
@@ -230,6 +233,9 @@ func (m *regMap) add(r *Reg) {
 
 func (m *regMap) special(s string) uint16 {
 	e := m.env
+	if e.Serial != nil {
+		e.Baud, e.Parity = e.Serial()
+	}
 	switch s {
 	case "unit":
 		return uint16(m.dev.Unit())

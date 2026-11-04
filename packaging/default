@@ -10,4 +10,6 @@
 #     MODBUS_SLAVE_OPTS="-p /dev/ttyS7 -b 9600 --profile /etc/modbus-slave/my-device.yaml"
 #
 # --api 127.0.0.1:8650 is the local JSON API (status, registers, faults) for napiconfig and scripts.
-MODBUS_SLAVE_OPTS="-p /dev/ttyS7 -b 9600 -a 1 --api 127.0.0.1:8650"
+# --state keeps the port / speed / parity / Modbus TCP chosen on the web page or over the API.
+# --tcp :502 serves Modbus TCP instead of a serial port.
+MODBUS_SLAVE_OPTS="-p /dev/ttyS7 -b 9600 -a 1 --api 127.0.0.1:8650 --state /var/lib/modbus-slave/state.json"

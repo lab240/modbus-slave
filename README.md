@@ -39,8 +39,11 @@ modbus-slave -p 0 -p 1 -p 2 -p 3 -b 57600 --profile kth2r --units 1-4 --delay 5
 modbus-slave --pty /tmp/ttyEMU -b 9600 --profile kth2r
 mbpoll -m rtu -b 9600 -P none -a 1 -r 769 -c 2 /tmp/ttyEMU
 
-# your own device from a YAML profile, with the local API
+# your own device from a YAML profile, with the local API and the web page (http://127.0.0.1:8650/)
 modbus-slave -p /dev/ttyS7 -b 9600 --profile examples/soft-sensor.yaml --api 127.0.0.1:8650
+
+# Modbus TCP instead of a serial port
+modbus-slave --tcp :502 --profile kth2r --units 1-4
 ```
 
 ## Command line
@@ -48,6 +51,8 @@ modbus-slave -p /dev/ttyS7 -b 9600 --profile examples/soft-sensor.yaml --api 127
 | Option | Meaning |
 |---|---|
 | `-p <port>` | Serial port: `/dev/ttyUSB0`, `/dev/ttyS7`, or an **FT4232H/FT2232H channel** `0..3` / `A..D`, found by USB interface number (survives a re-plug, when the kernel hands out `ttyUSB4..7`). **Repeat for several lines.** |
+| `--tcp <addr>` | Serve **Modbus TCP** on `:502` / `0.0.0.0:1502` instead of a serial port. The unit id picks the device, 0 and 255 = the first one, another id gets exception 0x0B (as from a gateway). Repeatable. |
+| `--state <file>` | Keep the sensors as changed on the web page / over the API over a restart. |
 | `--pty <link>` | Serve a new pty and point `<link>` at it (tests without hardware). Repeatable. |
 | `-b <baud>` | Any baud rate the UART can do, 1200 … 4000000 (default 19200). |
 | `-o <mode>` | `8N1` `8E1` `8O1` `7E1` `8N2` (default `8N1`). |
@@ -110,23 +115,45 @@ Built-in: `kth2r` — KTH2-R T/RH sensor (see `internal/profile/builtin/kth2r.ya
 Example: [`examples/soft-sensor.yaml`](examples/soft-sensor.yaml) — CPU temperature from a file as float32 and
 int16, uptime as uint32, writable set points.
 
-## Local JSON API
+## Web page and local JSON API
 
-`--api 127.0.0.1:8650` (or `unix:/run/modbus-slave.sock`). Errors are `{"detail": "..."}`.
+`--api 127.0.0.1:8650` (or `unix:/run/modbus-slave.sock`; any other address needs `--api-token-file`).
+`http://<host>:8650/` is the web page: **one tile per emulated sensor**. In a tile you pick the template
+(Virtual, KTH2-R, your YAML profiles), the address, **RTU or TCP**, for RTU the port, speed and parity, and the mode:
+**normal** or **crazy** (slow, sometimes no answer, an exception or a broken CRC). Changes apply at once.
+Sensors on the same port are one RS-485 bus (a new speed or parity is given to all of them); sensors with the same
+TCP port are one Modbus TCP server, the unit id picks the sensor (0 and 255 = the first one, an unknown id gets
+exception 0x0B). The ☰ button shows the registers of a sensor with live values and writes. "More settings" has
+the faults of the crazy mode and the buses with their counters. With `--state FILE` the sensors are kept over a
+restart (then the ports and units of the command line are only the first start).
+
+Templates: `generic` (v1 device), the built-in profiles, and `*.yaml` in `/etc/modbus-slave/profiles` and
+`/usr/share/modbus-slave/profiles`.
 
 | Request | |
 |---|---|
-| `GET /api/v1/status` | version, profile, mode, uptime; per line: device, open, counters, faults, devices |
-| `GET /api/v1/profiles` | the profiles |
-| `GET /api/v1/lines/{line}/faults` | fault settings |
-| `PUT /api/v1/lines/{line}/faults` | change them on the fly: `{"delay_ms": 20, "jitter_ms": 30, "drop": 0.01, "exc": 0, "badcrc": 0, "frag": 0, "frag_gap_ms": 5, "echo": false}` — only the fields given |
-| `GET /api/v1/lines/{line}/devices/{unit}/registers?addr=0x300&count=2[&fc=4]` | read registers |
-| `PUT /api/v1/lines/{line}/devices/{unit}/registers` | write writable registers: `{"addr": 1279, "values": [-50]}` |
+| `GET /api/v1/status` | version, uptime, the buses (lines) with counters |
+| `GET /api/v1/templates` | the sensor templates |
+| `GET /api/v1/ports` | serial ports found in the system (stable `/dev/serial/by-path` links, USB maker/product) |
+| `GET /api/v1/sensors` | the sensors with their live state (open, error, requests served, seconds since the last one) |
+| `POST /api/v1/sensors` | add one: `{"profile": "kth2r", "unit": 1, "transport": "rtu", "port": "/dev/ttyUSB0", "baud": 9600, "mode": "8N1"}` |
+| `PUT /api/v1/sensors/{id}` | change the fields given: `{"transport": "tcp", "listen": ":502"}`, `{"crazy": true}`, `{"baud": 19200, "mode": "8E1"}` |
+| `DELETE /api/v1/sensors/{id}` | remove it |
+| `GET /api/v1/sensors/{id}/map` | the register map of its template: blocks with name, type, source, writable |
+| `GET /api/v1/sensors/{id}/registers?addr=0x300&count=2[&fc=4]` | read registers |
+| `PUT /api/v1/sensors/{id}/registers` | write writable registers: `{"addr": 1279, "values": [-50]}` |
+| `GET /api/v1/sensors?values=1` | the same plus the main values of every sensor: one request for the whole page |
+| `GET /api/v1/service`, `PUT /api/v1/service` | `{"running": false}` stops the emulation (ports closed, the page stays), `{"enabled": true}` = `systemctl enable` (start with the system) |
+| `GET /api/v1/crazy`, `PUT /api/v1/crazy` | the faults of the crazy mode: `{"delay_ms": 20, "jitter_ms": 400, "drop": 0.1, "exc": 0.05, "badcrc": 0.05, "frag": 0, "frag_gap_ms": 5}` |
 
 ```sh
-curl -s localhost:8650/api/v1/status
-curl -s -X PUT -d '{"drop": 0.05}' localhost:8650/api/v1/lines/2/faults
+curl -s localhost:8650/api/v1/sensors
+curl -s -X PUT -d '{"crazy": true}' localhost:8650/api/v1/sensors/2
+curl -s -X PUT -d '{"transport": "tcp", "listen": ":502"}' localhost:8650/api/v1/sensors/1
 ```
+
+The registers `speed_code`, `parity_code`, `baud100` follow the settings of the sensor. The command-line faults
+(`--delay`, `--drop`, ...) are the normal mode of every sensor.
 
 ## Line test
 

@@ -146,3 +146,6 @@ func SetLatency(dev string, ms int) {}
 func OpenPty(link string) (Conn, error) {
 	return nil, fmt.Errorf("--pty is not available on Windows; use a virtual COM pair (com0com)")
 }
+
+// List is not implemented on Windows yet: the port is typed (COM3).
+func List() []PortInfo { return nil }

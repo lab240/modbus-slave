@@ -1,10 +1,11 @@
 [Unit]
-Description=Modbus RTU slave emulator / soft sensor (modbus-slave)
+Description=Modbus RTU/TCP slave emulator / soft sensor (modbus-slave)
 Documentation=https://github.com/lab240/modbus-slave
 After=network-online.target
 Wants=network-online.target
 
 [Service]
+StateDirectory=modbus-slave
 Type=simple
 EnvironmentFile=-/etc/default/modbus-slave
 ExecStart=/usr/bin/modbus-slave $MODBUS_SLAVE_OPTS

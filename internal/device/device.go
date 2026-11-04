@@ -37,6 +37,7 @@ type Device struct {
 	funcs  map[byte]bool
 	mu     sync.Mutex // one request at a time per device (writes vs reads)
 	Served atomic.Uint64
+	Last   atomic.Int64 // time of the last request to it, unix ns (0 = none yet)
 }
 
 // New makes a device answering the given function codes (3, 4, 6, 8, 16 are implemented).

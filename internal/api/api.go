@@ -1,20 +1,33 @@
-// Package api is the local JSON API: status and counters, registers, faults on the fly.
-// It is meant for a local manager (napiconfig) or a small web page; it listens on 127.0.0.1 or a unix
-// socket by default, and any other address needs a token.
+// Package api is the local JSON API and the web page: the emulated sensors, their registers, the crazy mode.
+// It listens on 127.0.0.1 or a unix socket by default; any other address needs a token.
 //
-//	GET  /api/v1/status
-//	GET  /api/v1/profiles
-//	GET  /api/v1/lines/{line}/faults
-//	PUT  /api/v1/lines/{line}/faults                          {"delay_ms": 20, "drop": 0.01}  (fields given are changed)
-//	GET  /api/v1/lines/{line}/devices/{unit}/registers?addr=0x300&count=2[&fc=4]
-//	PUT  /api/v1/lines/{line}/devices/{unit}/registers        {"addr": 768, "values": [215]}  (writable registers only)
+//	GET    /                                   the web page (static; it asks for the token if one is set)
+//	GET    /api/v1/status                      version, uptime, the lines (buses) with counters
+//	GET    /api/v1/templates                   sensor templates (profiles)
+//	GET    /api/v1/ports                       serial ports found in the system
+//	GET    /api/v1/sensors                     the sensors with their live state
+//	POST   /api/v1/sensors                     add one: {"profile": "kth2r", "unit": 1, "transport": "rtu", "port": "/dev/ttyUSB0", "baud": 9600, "mode": "8N1"}
+//	GET    /api/v1/sensors/{id}
+//	PUT    /api/v1/sensors/{id}                change the fields given: {"transport": "tcp", "listen": ":502"}, {"crazy": true}
+//	DELETE /api/v1/sensors/{id}
+//	GET    /api/v1/sensors/{id}/map            the register map of its template
+//	GET    /api/v1/sensors/{id}/registers?addr=0x300&count=2[&fc=4]
+//	PUT    /api/v1/sensors/{id}/registers      {"addr": 1279, "values": [-50]}  (writable registers only)
+//	GET    /api/v1/sensors?values=1            ... and the main values of every sensor (one request for the whole page)
+//	GET    /api/v1/service                     {"running": true, "unit": "modbus-slave.service", "enabled": true}
+//	PUT    /api/v1/service                     {"running": false} stops the emulation (every port closed; the page stays),
+//	                                           {"enabled": true} = systemctl enable (start with the system)
+//	GET    /api/v1/crazy                       the faults of the crazy mode
+//	PUT    /api/v1/crazy                       change them: {"delay_ms": 20, "jitter_ms": 400, "drop": 0.1, ...}
 package api
 
 import (
 	"crypto/subtle"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -24,27 +37,31 @@ import (
 	"time"
 
 	"github.com/lab240/modbus-slave/internal/device"
+	"github.com/lab240/modbus-slave/internal/fleet"
 	"github.com/lab240/modbus-slave/internal/profile"
+	"github.com/lab240/modbus-slave/internal/serial"
 	"github.com/lab240/modbus-slave/internal/server"
 )
+
+//go:embed web/index.html
+var page []byte
 
 // Info is the static part of the status.
 type Info struct {
 	Version string `json:"version"`
-	Profile string `json:"profile"`
-	Mode    string `json:"mode"` // "57600 8N1"
-	Baud    int    `json:"baud"`
 }
 
 type API struct {
 	info  Info
-	lines []*server.Line
+	f     *fleet.Fleet
+	regs  int // generic: number of registers
 	token string
 	start time.Time
+	unit  string // our systemd unit, "" when not run by systemd
 }
 
-func New(info Info, lines []*server.Line, token string) *API {
-	return &API{info: info, lines: lines, token: token, start: time.Now()}
+func New(info Info, f *fleet.Fleet, genericRegs int, token string) *API {
+	return &API{info: info, f: f, regs: genericRegs, token: token, start: time.Now(), unit: unitName()}
 }
 
 // Listen opens "unix:/path", "host:port" or ":port". A non-loopback TCP address needs a token.
@@ -69,16 +86,37 @@ func Listen(addr, token string) (net.Listener, error) {
 	return net.Listen("tcp", addr)
 }
 
-// Handler is the HTTP handler of the API.
+// Handler is the HTTP handler of the API and the page.
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/status", a.status)
-	mux.HandleFunc("GET /api/v1/profiles", a.profiles)
-	mux.HandleFunc("GET /api/v1/lines/{line}/faults", a.getFaults)
-	mux.HandleFunc("PUT /api/v1/lines/{line}/faults", a.putFaults)
-	mux.HandleFunc("GET /api/v1/lines/{line}/devices/{unit}/registers", a.getRegs)
-	mux.HandleFunc("PUT /api/v1/lines/{line}/devices/{unit}/registers", a.putRegs)
+	mux.HandleFunc("GET /api/v1/templates", func(w http.ResponseWriter, r *http.Request) { reply(w, a.f.Templates()) })
+	mux.HandleFunc("GET /api/v1/ports", func(w http.ResponseWriter, r *http.Request) {
+		ps := serial.List()
+		if ps == nil {
+			ps = []serial.PortInfo{}
+		}
+		reply(w, ps)
+	})
+	mux.HandleFunc("GET /api/v1/sensors", a.sensors)
+	mux.HandleFunc("POST /api/v1/sensors", a.addSensor)
+	mux.HandleFunc("GET /api/v1/sensors/{id}", a.getSensor)
+	mux.HandleFunc("PUT /api/v1/sensors/{id}", a.putSensor)
+	mux.HandleFunc("DELETE /api/v1/sensors/{id}", a.delSensor)
+	mux.HandleFunc("GET /api/v1/sensors/{id}/map", a.getMap)
+	mux.HandleFunc("GET /api/v1/sensors/{id}/registers", a.getRegs)
+	mux.HandleFunc("PUT /api/v1/sensors/{id}/registers", a.putRegs)
+	mux.HandleFunc("GET /api/v1/crazy", func(w http.ResponseWriter, r *http.Request) { reply(w, toJSON(a.f.Crazy())) })
+	mux.HandleFunc("PUT /api/v1/crazy", a.putCrazy)
+	mux.HandleFunc("GET /api/v1/service", a.getService)
+	mux.HandleFunc("PUT /api/v1/service", a.putService)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/index.html") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+			w.Write(page)
+			return
+		}
 		if a.token != "" {
 			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if subtle.ConstantTimeCompare([]byte(got), []byte(a.token)) != 1 {
@@ -120,186 +158,207 @@ type stats struct {
 	BadCRC  uint64 `json:"badcrc"`
 }
 
-type devStatus struct {
-	Unit   byte   `json:"unit"`
-	Served uint64 `json:"served"`
-	Source string `json:"source,omitempty"`
-}
-
 type lineStatus struct {
-	Line    int         `json:"line"`
-	Spec    string      `json:"spec"`
-	Device  string      `json:"device"`
-	Open    bool        `json:"open"`
-	Stats   stats       `json:"stats"`
-	Faults  faults      `json:"faults"`
-	Devices []devStatus `json:"devices"`
+	Line     int             `json:"line"`
+	Device   string          `json:"device"`
+	Open     bool            `json:"open"`
+	Error    string          `json:"error,omitempty"`
+	Settings server.Settings `json:"settings"`
+	Stats    stats           `json:"stats"`
+	Units    []int           `json:"units"`
 }
 
 func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		Info
 		UptimeS float64      `json:"uptime_s"`
+		Running bool         `json:"running"`
+		Sensors int          `json:"sensors"`
 		Lines   []lineStatus `json:"lines"`
-	}{Info: a.info, UptimeS: time.Since(a.start).Seconds()}
-	for _, l := range a.lines {
+	}{Info: a.info, UptimeS: time.Since(a.start).Seconds(), Running: a.f.Running(), Sensors: len(a.f.List()), Lines: []lineStatus{}}
+	for _, l := range a.f.Lines() {
 		s := l.Stats.Snapshot()
-		ls := lineStatus{Line: l.Index, Spec: l.Spec, Device: l.Device(), Open: l.Open(),
-			Stats:  stats{s.Req, s.Ans, s.Exc, s.Foreign, s.Bcast, s.Resync, s.Drop, s.BadCRC},
-			Faults: toJSON(l.Faults())}
+		ls := lineStatus{Line: l.Index, Device: l.Device(), Open: l.Open(), Error: l.Err(), Settings: l.Settings(),
+			Stats: stats{s.Req, s.Ans, s.Exc, s.Foreign, s.Bcast, s.Resync, s.Drop, s.BadCRC}}
 		for _, d := range l.Devices {
-			ds := devStatus{Unit: d.Unit(), Served: d.Served.Load()}
-			if g, ok := d.Regs.(*device.Generic); ok {
-				ds.Source = g.Src.Describe()
-			}
-			ls.Devices = append(ls.Devices, ds)
+			ls.Units = append(ls.Units, int(d.Unit()))
 		}
 		out.Lines = append(out.Lines, ls)
 	}
 	reply(w, out)
 }
 
-func (a *API) profiles(w http.ResponseWriter, r *http.Request) {
-	type item struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+type sensorOut struct {
+	fleet.Sensor
+	Live   *fleet.Live `json:"live,omitempty"`
+	Values []values    `json:"values,omitempty"` // with ?values=1
+}
+
+// values are the registers of one block of the main values of a sensor (measurements, not the passport).
+type values struct {
+	Addr int      `json:"addr"`
+	Regs []uint16 `json:"regs"`
+}
+
+// mainValues: up to 3 blocks whose values change (wave, file, random), up to 4 registers each;
+// the generic device: its first 4 registers.
+func (a *API) mainValues(id int) []values {
+	d, p, ok := a.f.Device(id)
+	if !ok {
+		return nil
 	}
-	out := []item{{"generic", "v1: N holding registers, random or from a file (-f id:file)"}}
-	for _, n := range profile.Builtin() {
-		if p, err := profile.Load(n); err == nil {
-			out = append(out, item{n, p.Description})
+	var out []values
+	for _, b := range MapOf(p, a.regs).Holding {
+		if len(out) == 3 {
+			break
 		}
+		if p != nil && (b.Type == "string" || !(strings.HasPrefix(b.Source, "wave") || strings.HasPrefix(b.Source, "file") || strings.HasPrefix(b.Source, "random"))) {
+			continue
+		}
+		if regs, err := d.ReadRegs(3, uint16(b.Addr), uint16(min(b.Regs, 4))); err == nil {
+			out = append(out, values{b.Addr, regs})
+		}
+		if p == nil {
+			break
+		}
+	}
+	return out
+}
+
+func (a *API) sensors(w http.ResponseWriter, r *http.Request) {
+	live := a.f.LiveOf()
+	withValues := r.URL.Query().Get("values") != ""
+	out := []sensorOut{}
+	for _, s := range a.f.List() {
+		so := sensorOut{Sensor: s}
+		if lv, ok := live[s.ID]; ok {
+			so.Live = &lv
+		}
+		if withValues {
+			so.Values = a.mainValues(s.ID)
+		}
+		out = append(out, so)
 	}
 	reply(w, out)
 }
 
-// faults in JSON: durations in ms.
-type faults struct {
-	DelayMs   float64 `json:"delay_ms"`
-	JitterMs  float64 `json:"jitter_ms"`
-	Drop      float64 `json:"drop"`
-	Exc       float64 `json:"exc"`
-	BadCRC    float64 `json:"badcrc"`
-	Frag      int     `json:"frag"`
-	FragGapMs float64 `json:"frag_gap_ms"`
-	Echo      bool    `json:"echo"`
-}
-
-func ms(d time.Duration) float64   { return float64(d) / float64(time.Millisecond) }
-func dur(ms float64) time.Duration { return time.Duration(ms * float64(time.Millisecond)) }
-
-func toJSON(f server.Faults) faults {
-	return faults{ms(f.Delay), ms(f.Jitter), f.Drop, f.Exc, f.BadCRC, f.Frag, ms(f.FragGap), f.Echo}
-}
-
-func (a *API) line(w http.ResponseWriter, r *http.Request) *server.Line {
-	n, err := strconv.Atoi(r.PathValue("line"))
-	if err != nil || n < 0 || n >= len(a.lines) {
-		fail(w, http.StatusNotFound, fmt.Sprintf("no line %q (0..%d)", r.PathValue("line"), len(a.lines)-1))
-		return nil
+func (a *API) id(w http.ResponseWriter, r *http.Request) (int, bool) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || a.f.Get(id).ID == 0 {
+		fail(w, http.StatusNotFound, fmt.Sprintf("no sensor %q", r.PathValue("id")))
+		return 0, false
 	}
-	return a.lines[n]
+	return id, true
 }
 
-func (a *API) getFaults(w http.ResponseWriter, r *http.Request) {
-	if l := a.line(w, r); l != nil {
-		reply(w, toJSON(l.Faults()))
+func (a *API) getSensor(w http.ResponseWriter, r *http.Request) {
+	if id, ok := a.id(w, r); ok {
+		so := sensorOut{Sensor: a.f.Get(id)}
+		if lv, ok := a.f.LiveOf()[id]; ok {
+			so.Live = &lv
+		}
+		reply(w, so)
 	}
 }
 
-func (a *API) putFaults(w http.ResponseWriter, r *http.Request) {
-	l := a.line(w, r)
-	if l == nil {
-		return
-	}
-	var in struct {
-		DelayMs, JitterMs, Drop, Exc, BadCRC, FragGapMs *float64
-		Frag                                            *int
-		Echo                                            *bool
-	}
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
+// editable are the fields of a sensor the API may set.
+var editable = map[string]bool{"name": true, "profile": true, "unit": true, "transport": true, "port": true,
+	"baud": true, "mode": true, "listen": true, "crazy": true, "file": true, "stopped": true}
+
+// overlay applies the JSON fields of body to s; unknown fields are an error.
+func overlay(s *fleet.Sensor, body []byte) error {
 	var raw map[string]json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
-		fail(w, http.StatusUnprocessableEntity, "body: "+err.Error())
-		return
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return err
 	}
-	fields := map[string]any{"delay_ms": &in.DelayMs, "jitter_ms": &in.JitterMs, "drop": &in.Drop, "exc": &in.Exc,
-		"badcrc": &in.BadCRC, "frag": &in.Frag, "frag_gap_ms": &in.FragGapMs, "echo": &in.Echo}
+	for k := range raw {
+		if !editable[k] {
+			return fmt.Errorf("unknown field %s", k)
+		}
+	}
+	cur, _ := json.Marshal(s)
+	var m map[string]json.RawMessage
+	json.Unmarshal(cur, &m)
 	for k, v := range raw {
-		dst, ok := fields[k]
-		if !ok {
-			fail(w, http.StatusUnprocessableEntity, "unknown field "+k)
-			return
-		}
-		if err := json.Unmarshal(v, dst); err != nil {
-			fail(w, http.StatusUnprocessableEntity, k+": "+err.Error())
-			return
-		}
+		m[k] = v
 	}
-	f := l.Faults()
-	for _, p := range []struct {
-		v    *float64
-		name string
-	}{{in.Drop, "drop"}, {in.Exc, "exc"}, {in.BadCRC, "badcrc"}} {
-		if p.v != nil && (*p.v < 0 || *p.v > 1) {
-			fail(w, http.StatusUnprocessableEntity, p.name+": a probability 0..1")
-			return
-		}
-	}
-	for _, p := range []*float64{in.DelayMs, in.JitterMs, in.FragGapMs} {
-		if p != nil && (*p < 0 || *p > 60000) {
-			fail(w, http.StatusUnprocessableEntity, "times: 0..60000 ms")
-			return
-		}
-	}
-	set := func(dst *float64, v *float64) {
-		if v != nil {
-			*dst = *v
-		}
-	}
-	if in.DelayMs != nil {
-		f.Delay = dur(*in.DelayMs)
-	}
-	if in.JitterMs != nil {
-		f.Jitter = dur(*in.JitterMs)
-	}
-	if in.FragGapMs != nil {
-		f.FragGap = dur(*in.FragGapMs)
-	}
-	set(&f.Drop, in.Drop)
-	set(&f.Exc, in.Exc)
-	set(&f.BadCRC, in.BadCRC)
-	if in.Frag != nil {
-		f.Frag = *in.Frag
-	}
-	if in.Echo != nil {
-		f.Echo = *in.Echo
-	}
-	l.SetFaults(f)
-	log.Printf("api: line %d faults %+v", l.Index, toJSON(f))
-	reply(w, toJSON(f))
+	merged, _ := json.Marshal(m)
+	return json.Unmarshal(merged, s)
 }
 
-func (a *API) dev(w http.ResponseWriter, r *http.Request) (*server.Line, *device.Device) {
-	l := a.line(w, r)
-	if l == nil {
+func readBody(r *http.Request) []byte {
+	b, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	return b
+}
+
+func (a *API) addSensor(w http.ResponseWriter, r *http.Request) {
+	body := readBody(r)
+	var s fleet.Sensor
+	if strings.TrimSpace(string(body)) != "" {
+		if err := overlay(&s, body); err != nil {
+			fail(w, http.StatusUnprocessableEntity, "body: "+err.Error())
+			return
+		}
+	}
+	got, err := a.f.Add(s)
+	if err != nil {
+		fail(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(sensorOut{Sensor: got})
+}
+
+func (a *API) putSensor(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.id(w, r)
+	if !ok {
+		return
+	}
+	body := readBody(r)
+	var perr error
+	got, also, err := a.f.Update(id, func(s *fleet.Sensor) { perr = overlay(s, body) })
+	if perr != nil {
+		fail(w, http.StatusUnprocessableEntity, "body: "+perr.Error())
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if also == nil {
+		also = []int{}
+	}
+	reply(w, map[string]any{"sensor": got, "also": also})
+}
+
+func (a *API) delSensor(w http.ResponseWriter, r *http.Request) {
+	if id, ok := a.id(w, r); ok {
+		if err := a.f.Remove(id); err != nil {
+			fail(w, http.StatusConflict, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (a *API) dev(w http.ResponseWriter, r *http.Request) (*device.Device, *profile.Profile) {
+	id, ok := a.id(w, r)
+	if !ok {
 		return nil, nil
 	}
-	u, err := strconv.Atoi(r.PathValue("unit"))
-	if err == nil {
-		for _, d := range l.Devices {
-			if int(d.Unit()) == u {
-				return l, d
-			}
-		}
+	d, p, _ := a.f.Device(id)
+	return d, p
+}
+
+func (a *API) getMap(w http.ResponseWriter, r *http.Request) {
+	if d, p := a.dev(w, r); d != nil {
+		reply(w, MapOf(p, a.regs))
 	}
-	fail(w, http.StatusNotFound, fmt.Sprintf("no unit %q on line %d", r.PathValue("unit"), l.Index))
-	return nil, nil
 }
 
 func (a *API) getRegs(w http.ResponseWriter, r *http.Request) {
-	_, d := a.dev(w, r)
+	d, _ := a.dev(w, r)
 	if d == nil {
 		return
 	}
@@ -327,7 +386,7 @@ func cmp(s, def string) string {
 }
 
 func (a *API) putRegs(w http.ResponseWriter, r *http.Request) {
-	l, d := a.dev(w, r)
+	d, _ := a.dev(w, r)
 	if d == nil {
 		return
 	}
@@ -354,6 +413,120 @@ func (a *API) putRegs(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "not writable: "+err.Error())
 		return
 	}
-	log.Printf("api: line %d unit %d: wrote %d register(s) at 0x%04X", l.Index, d.Unit(), len(vals), *in.Addr)
+	log.Printf("api: unit %d: wrote %d register(s) at 0x%04X", d.Unit(), len(vals), *in.Addr)
 	reply(w, map[string]any{"addr": *in.Addr, "values": vals})
+}
+
+// Faults is the API / state-file form of server.Faults: times in ms.
+type Faults struct {
+	DelayMs   float64 `json:"delay_ms"`
+	JitterMs  float64 `json:"jitter_ms"`
+	Drop      float64 `json:"drop"`
+	Exc       float64 `json:"exc"`
+	BadCRC    float64 `json:"badcrc"`
+	Frag      int     `json:"frag"`
+	FragGapMs float64 `json:"frag_gap_ms"`
+}
+
+func ms(d time.Duration) float64   { return float64(d) / float64(time.Millisecond) }
+func dur(ms float64) time.Duration { return time.Duration(ms * float64(time.Millisecond)) }
+
+func toJSON(f server.Faults) Faults {
+	return Faults{ms(f.Delay), ms(f.Jitter), f.Drop, f.Exc, f.BadCRC, f.Frag, ms(f.FragGap)}
+}
+
+// ToFaults converts back; Check first.
+func (in Faults) ToFaults() server.Faults {
+	return server.Faults{Delay: dur(in.DelayMs), Jitter: dur(in.JitterMs), Drop: in.Drop, Exc: in.Exc, BadCRC: in.BadCRC,
+		Frag: in.Frag, FragGap: dur(in.FragGapMs)}
+}
+
+// FaultsOf is the API form of f.
+func FaultsOf(f server.Faults) Faults { return toJSON(f) }
+
+// Check validates the ranges.
+func (in Faults) Check() error {
+	for _, p := range []float64{in.Drop, in.Exc, in.BadCRC} {
+		if p < 0 || p > 1 {
+			return errors.New("drop, exc, badcrc: a probability 0..1")
+		}
+	}
+	for _, t := range []float64{in.DelayMs, in.JitterMs, in.FragGapMs} {
+		if t < 0 || t > 60000 {
+			return errors.New("times: 0..60000 ms")
+		}
+	}
+	if in.Frag < 0 || in.Frag > 64 {
+		return errors.New("frag: 0..64")
+	}
+	return nil
+}
+
+func (a *API) putCrazy(w http.ResponseWriter, r *http.Request) {
+	in := toJSON(a.f.Crazy())
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		fail(w, http.StatusUnprocessableEntity, "body: "+err.Error())
+		return
+	}
+	if err := in.Check(); err != nil {
+		fail(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	a.f.SetCrazy(in.ToFaults())
+	log.Printf("api: crazy mode %+v", in)
+	reply(w, in)
+}
+
+// Block is one block of the register map.
+type Block struct {
+	Addr      int     `json:"addr"`
+	Regs      int     `json:"regs"` // registers the block takes
+	Name      string  `json:"name,omitempty"`
+	Type      string  `json:"type"`
+	WordOrder string  `json:"word_order,omitempty"`
+	Scale     float64 `json:"scale,omitempty"`
+	Source    string  `json:"source"`
+	RW        bool    `json:"rw"`
+}
+
+// RegMap is the register map of a template.
+type RegMap struct {
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Functions   []int   `json:"functions"`
+	Holding     []Block `json:"holding"`
+	Input       []Block `json:"input,omitempty"` // empty: FC 4 reads the holding map
+}
+
+// MapOf describes a profile; p == nil is the generic device with n registers.
+func MapOf(p *profile.Profile, n int) RegMap {
+	if p == nil {
+		return RegMap{Name: fleet.Generic, Description: fmt.Sprintf("v1 device: %d holding registers, random values or from a file", n),
+			Functions: []int{3, 4}, Holding: []Block{{Addr: 0, Regs: n, Name: "registers", Type: "uint16", Source: "random or file"}}}
+	}
+	conv := func(rs []profile.Reg) []Block {
+		var out []Block
+		for i := range rs {
+			r := &rs[i]
+			t := r.Type
+			if t == "" {
+				t = "uint16"
+			}
+			if r.String != nil {
+				t = "string"
+			}
+			b := Block{Addr: r.Addr, Regs: r.Regs(), Name: r.Name, Type: t, Source: r.Kind(), RW: r.RW}
+			if r.Regs() > 1 && t != "uint16" && t != "int16" && t != "string" {
+				b.WordOrder = cmp(r.WordOrder, "big")
+			}
+			if r.Scale != 0 && r.Scale != 1 {
+				b.Scale = r.Scale
+			}
+			out = append(out, b)
+		}
+		return out
+	}
+	return RegMap{Name: p.Name, Description: p.Description, Functions: p.Functions, Holding: conv(p.Holding), Input: conv(p.Input)}
 }

@@ -52,3 +52,10 @@ func ParseMode(s string) (Config, error) {
 	}
 	return Config{DataBits: int(s[0] - '0'), Parity: s[1], StopBits: int(s[2] - '0')}, nil
 }
+
+// PortInfo is a serial port found in the system, for a port picker.
+type PortInfo struct {
+	Path string `json:"path"` // what to give as the port: a stable /dev/serial/by-path link if there is one
+	Dev  string `json:"dev"`  // the kernel device: /dev/ttyUSB0
+	Info string `json:"info"` // USB maker / product / serial, when known
+}

@@ -1,8 +1,10 @@
-// Package server answers Modbus RTU requests on one line for a set of emulated devices.
+// Package server answers Modbus requests on one line for a set of emulated devices:
+// Modbus RTU on a serial port (Serve) or Modbus TCP (ServeTCP).
 package server
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 	"sync/atomic"
@@ -44,23 +46,30 @@ func (s *Stats) Snapshot() Snapshot {
 // a sensor does not reboot when the master's adapter is re-plugged.
 type Line struct {
 	Index   int
-	Spec    string // what the user gave: path, FT4232H channel, pty link
+	Spec    string // what the user gave at start: path, FT4232H channel, pty link, TCP address
 	Devices []*device.Device
 	faults  atomic.Pointer[Faults]
-	Gap     time.Duration // silence that discards a partial frame
+	Gap     time.Duration // silence that discards a partial frame; 0 = t3.5 of the baud rate
 	Stats   Stats
 
-	mu   sync.Mutex
-	rnd  *rand.Rand
-	dev  string // device in use right now, for the report
-	open atomic.Bool
+	unitFaults atomic.Pointer[map[byte]Faults] // per-unit faults instead of the line's ones (a "crazy" sensor)
+	settings   atomic.Pointer[Settings]
+	changed    chan struct{} // a new Settings: the serving loop reopens the line
+
+	mu      sync.Mutex
+	rnd     *rand.Rand
+	dev     string // device in use right now, for the report
+	lastErr string // why the line is not open
+	open    atomic.Bool
 }
 
 // Open reports whether the port is open and served right now.
 func (l *Line) Open() bool { return l.open.Load() }
 
 func NewLine(index int, spec string, devs []*device.Device, f Faults, gap time.Duration, seed uint64) *Line {
-	l := &Line{Index: index, Spec: spec, Devices: devs, Gap: gap, rnd: rand.New(rand.NewPCG(seed, uint64(index)+1))}
+	l := &Line{Index: index, Spec: spec, Devices: devs, Gap: gap, rnd: rand.New(rand.NewPCG(seed, uint64(index)+1)),
+		changed: make(chan struct{}, 1)}
+	l.settings.Store(&Settings{Transport: "rtu", Port: spec, Baud: 19200, Mode: "8N1"})
 	l.SetFaults(f)
 	return l
 }
@@ -71,8 +80,73 @@ func (l *Line) Faults() Faults { return *l.faults.Load() }
 // SetFaults changes the fault settings; the next request uses them.
 func (l *Line) SetFaults(f Faults) { l.faults.Store(&f) }
 
+// SetUnitFaults gives some units their own faults; the others keep the line's. nil = none.
+func (l *Line) SetUnitFaults(m map[byte]Faults) { l.unitFaults.Store(&m) }
+
+// FaultsFor is what applies to a request for unit.
+func (l *Line) FaultsFor(unit byte) Faults {
+	if m := l.unitFaults.Load(); m != nil && *m != nil {
+		if f, ok := (*m)[unit]; ok {
+			return f
+		}
+	}
+	return l.Faults()
+}
+
 func (l *Line) Device() string     { l.mu.Lock(); defer l.mu.Unlock(); return l.dev }
 func (l *Line) setDevice(d string) { l.mu.Lock(); l.dev = d; l.mu.Unlock() }
+
+// Settings is how the line is served now.
+func (l *Line) Settings() Settings { return *l.settings.Load() }
+
+// InitSettings sets the settings before the line is served.
+func (l *Line) InitSettings(s Settings) error {
+	if err := s.Check(); err != nil {
+		return err
+	}
+	l.settings.Store(&s)
+	return nil
+}
+
+// SetSettings changes the settings of a running line: it is closed and opened again with them.
+// A pty line keeps its port.
+func (l *Line) SetSettings(s Settings) (Settings, error) {
+	old := l.Settings()
+	s.Pty = old.Pty
+	if old.Pty && s.Transport != "tcp" && s.Port != old.Port {
+		return old, fmt.Errorf("line %d is a pty (%s): its port cannot be changed", l.Index, old.Port)
+	}
+	if err := s.Check(); err != nil {
+		return old, err
+	}
+	l.settings.Store(&s)
+	select {
+	case l.changed <- struct{}{}:
+	default:
+	}
+	return s, nil
+}
+
+// Changed is signalled when SetSettings was called.
+func (l *Line) Changed() <-chan struct{} { return l.changed }
+
+// Err is why the line is not open now ("" when it is, or before the first attempt).
+func (l *Line) Err() string        { l.mu.Lock(); defer l.mu.Unlock(); return l.lastErr }
+func (l *Line) SetErr(e string)    { l.mu.Lock(); l.lastErr = e; l.mu.Unlock() }
+func (l *Line) SetDevice(d string) { l.setDevice(d) }
+
+// gap is the silence that ends a partial frame.
+func (l *Line) gap() time.Duration {
+	if l.Gap > 0 {
+		return l.Gap
+	}
+	s := l.Settings()
+	c, err := s.Serial()
+	if err != nil {
+		return 20 * time.Millisecond
+	}
+	return rtu.T35(c.Baud, c.BitsPerChar())
+}
 
 func (l *Line) chance(p float64) bool {
 	if p <= 0 {
@@ -108,13 +182,14 @@ func (l *Line) Serve(ctx context.Context, c serial.Conn) error {
 	l.setDevice(c.Name())
 	l.open.Store(true)
 	defer l.open.Store(false)
+	gap := l.gap()
 	buf := make([]byte, 0, 512)
 	rd := make([]byte, 512)
 	var last time.Time
 	for ctx.Err() == nil {
 		timeout := 200 * time.Millisecond
 		if len(buf) > 0 {
-			timeout = l.Gap
+			timeout = gap
 		}
 		ok, err := c.Wait(timeout)
 		if err != nil {
@@ -130,7 +205,7 @@ func (l *Line) Serve(ctx context.Context, c serial.Conn) error {
 			buf = append(buf, rd[:n]...)
 			last = now
 		}
-		silence := !ok && len(buf) > 0 && now.Sub(last) >= l.Gap
+		silence := !ok && len(buf) > 0 && now.Sub(last) >= gap
 		if silence && rtu.RequestLen(buf) == 0 && rtu.CheckCRC(buf) {
 			// an unknown function code with a valid CRC: answer exception 1
 			frame = append([]byte(nil), buf...)
@@ -166,9 +241,10 @@ func (l *Line) Serve(ctx context.Context, c serial.Conn) error {
 	return ctx.Err()
 }
 
-func (l *Line) answer(c serial.Conn, frame []byte) error {
-	unit, pdu := frame[0], frame[1:len(frame)-2]
-	if unit == 0 { // broadcast: writes are executed, nobody answers
+// handle runs one request for the unit; nil = no answer (broadcast, a unit not on this line, an injected drop).
+// tcp: a unit that is not here gets exception 0x0B, as from a gateway, instead of silence.
+func (l *Line) handle(unit byte, pdu []byte, tcp bool) []byte {
+	if unit == 0 && !tcp { // broadcast: writes are executed, nobody answers
 		l.Stats.Bcast.Add(1)
 		if pdu[0] == 6 || pdu[0] == 16 {
 			for _, d := range l.Devices {
@@ -180,13 +256,21 @@ func (l *Line) answer(c serial.Conn, frame []byte) error {
 		return nil
 	}
 	d := l.find(unit)
+	if d == nil && tcp && (unit == 0 || unit == 0xFF) && len(l.Devices) > 0 {
+		d = l.Devices[0] // Modbus TCP: unit 0 / 255 = "the server itself"
+	}
 	if d == nil {
 		l.Stats.Foreign.Add(1)
+		if tcp {
+			l.Stats.Exc.Add(1)
+			return rtu.Exception(pdu[0], 0x0B) // gateway target device failed to respond
+		}
 		return nil
 	}
 	l.Stats.Req.Add(1)
 	d.Served.Add(1)
-	f := l.Faults()
+	d.Last.Store(time.Now().UnixNano())
+	f := l.FaultsFor(unit)
 	if l.chance(f.Drop) {
 		l.Stats.Drop.Add(1)
 		return nil
@@ -200,6 +284,17 @@ func (l *Line) answer(c serial.Conn, frame []byte) error {
 	if ans[0]&0x80 != 0 {
 		l.Stats.Exc.Add(1)
 	}
+	return ans
+}
+
+func (l *Line) answer(c serial.Conn, frame []byte) error {
+	unit, pdu := frame[0], frame[1:len(frame)-2]
+	ans := l.handle(unit, pdu, false)
+	if ans == nil {
+		return nil
+	}
+	f := l.FaultsFor(unit)
+	f.Echo = l.Faults().Echo // the echo is the transceiver's, not the device's
 	out := rtu.AppendCRC(append([]byte{unit}, ans...))
 	if l.chance(f.BadCRC) {
 		out[len(out)-1] ^= 0x5A
