@@ -1,0 +1,13 @@
+# Options of modbus-slave.service (see: modbus-slave -h, /usr/share/doc/modbus-slave/README.md).
+# The service is installed disabled:  systemctl enable --now modbus-slave
+#
+# Examples:
+#   one RS-485 port, 3 v1-style devices, device 1 from a file:
+#     MODBUS_SLAVE_OPTS="-p /dev/ttyS7 -b 9600 -a 3 -f 1:/run/sensor1.dat -t 15"
+#   4 FT4232H lines with KTH2-R sensors:
+#     MODBUS_SLAVE_OPTS="-p 0 -p 1 -p 2 -p 3 -b 19200 --profile kth2r --units 1-4"
+#   own profile:
+#     MODBUS_SLAVE_OPTS="-p /dev/ttyS7 -b 9600 --profile /etc/modbus-slave/my-device.yaml"
+#
+# --api 127.0.0.1:8650 is the local JSON API (status, registers, faults) for napiconfig and scripts.
+MODBUS_SLAVE_OPTS="-p /dev/ttyS7 -b 9600 -a 1 --api 127.0.0.1:8650"

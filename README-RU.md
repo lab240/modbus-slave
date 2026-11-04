@@ -167,6 +167,24 @@ modbus-slave line-test send   -p 0 -p 1 -p 2 -p 3 -b 57600 --secs 3
 - `resync` — сколько байт пропущено в поисках кадра (помехи, битый кадр);
 - `drop` / `badcrc` — внесённые сбои.
 
+## Пакет Debian
+
+```sh
+./build.sh && packaging/build-deb.sh     # dist/modbus-slave_<версия>_{amd64,arm64,armhf}.deb
+```
+
+Что ставится:
+- `/usr/bin/modbus-slave` и ссылка `modbus_slave` — имя из v1;
+- `modbus-slave.service` — после установки **выключен**;
+- `/etc/default/modbus-slave` — параметры в `MODBUS_SLAVE_OPTS`, при обновлении пакета ваши правки сохраняются;
+- профили и примеры — в `/usr/share/modbus-slave/profiles/`, скрипты для данных — в `/usr/share/modbus-slave/scripts/`.
+
+```sh
+sudoedit /etc/default/modbus-slave
+sudo systemctl enable --now modbus-slave
+journalctl -u modbus-slave -f
+```
+
 ## v1 (C)
 
 Версия на C лежит в `src/`, её бинарники — в `bin/` (Linux x86_64, aarch64, Windows x64). Командная строка

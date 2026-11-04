@@ -156,6 +156,22 @@ after 1s into 1 (`03` arrives as `07`). A real run, 915 m of twisted pair at 115
 `ans` answers, `exc` exceptions sent, `foreign` requests for other units, `bcast` broadcasts,
 `resync` bytes skipped to find a frame (noise, a broken frame), `drop`/`badcrc` injected faults.
 
+## Debian package
+
+```sh
+./build.sh && packaging/build-deb.sh     # dist/modbus-slave_<ver>_{amd64,arm64,armhf}.deb
+```
+
+`/usr/bin/modbus-slave` (+ `modbus_slave`, the v1 name), `modbus-slave.service` (installed **disabled**), options in
+`/etc/default/modbus-slave` (`MODBUS_SLAVE_OPTS`, a conffile), profiles and examples in
+`/usr/share/modbus-slave/profiles/`, data scripts in `/usr/share/modbus-slave/scripts/`.
+
+```sh
+sudoedit /etc/default/modbus-slave
+sudo systemctl enable --now modbus-slave
+journalctl -u modbus-slave -f
+```
+
 ## v1 (C)
 
 The C version is in `src/` and its binaries in `bin/` (Linux x86_64, aarch64, Windows x64). The v2 command line
