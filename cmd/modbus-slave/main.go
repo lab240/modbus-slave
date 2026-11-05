@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -100,6 +101,7 @@ func main() {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "modbus-slave %s — Modbus RTU / TCP slave emulator\n\nUsage:\n  modbus-slave -p <port> -b <baud> [-a n] [-o 8N1] [-f id:file] [-t s] [options]\n  modbus-slave --tcp :502 [-a n] [options]\n  modbus-slave -k | -s\n  modbus-slave line-test send|listen -p <port> [-p ...] -b <baud>   (raw line test, see line-test -h)\n\nOptions:\n", version)
 		fs.PrintDefaults()
+		fmt.Fprint(os.Stderr, usageExamples())
 	}
 	fs.Parse(os.Args[1:])
 	if o.showVersion {
@@ -118,6 +120,7 @@ func main() {
 	}
 	if len(o.ports) == 0 && len(o.ptys) == 0 && len(o.tcps) == 0 {
 		fs.Usage()
+		pauseIfOwnConsole()
 		os.Exit(2)
 	}
 	if o.daemon {
@@ -404,4 +407,32 @@ func reporter(ctx context.Context, linesOf func() []*server.Line, every time.Dur
 		prev = seen
 		log.Printf("[%6.0fs] %s", time.Since(t0).Seconds(), strings.Join(parts, "  "))
 	}
+}
+
+// usageExamples: ready-to-run commands with the usual parameters, printed after the options
+// (a first start without parameters should show how to actually start it and open the page).
+func usageExamples() string {
+	port, open, list := "/dev/ttyUSB0", "xdg-open http://127.0.0.1:8650", "ls /dev/serial/by-path/"
+	exe := "modbus-slave"
+	if runtime.GOOS == "windows" {
+		port, open, list, exe = "COM5", "start http://127.0.0.1:8650", "mode   (or Device Manager -> Ports)", `.\modbus-slave.exe`
+	}
+	return fmt.Sprintf(`
+Examples:
+  # 4 KTH2-R sensors (addresses 1-4) on a serial port, 9600 8N1, with the web page
+  %[1]s -p %[2]s -b 9600 --profile kth2r --units 1-4 --api 127.0.0.1:8650
+
+  # the same over Modbus TCP, no hardware needed
+  %[1]s --tcp :1502 --profile kth2r --units 1-4 --api 127.0.0.1:8650
+
+  # then open the page in a browser (sensors, ports, registers are changed there):
+  %[3]s
+
+  # poll it (registers from 1 in mbpoll/modpoll: 769 = T/RH of KTH2-R):
+  modpoll -m rtu -b 9600 -p none -a 1 -t 4 -r 769 -c 2 <port of the master>
+  modpoll -m tcp -p 1502 -a 1 -t 4 -r 769 -c 2 127.0.0.1
+
+  # serial ports of this machine: %[4]s
+  # built-in device profiles:     %[1]s --list-profiles
+`, exe, port, open, list)
 }
