@@ -68,7 +68,7 @@ modbus-slave --tcp :502 --profile kth2r --units 1-4
 | `--latency <ms>` | FTDI `latency_timer` (default 1; FTDI's own default 16 ms adds up to 16 ms per answer). |
 | `--gap <ms>` | Silence that discards a partial frame (default 20; `0` = t3.5 of the baud rate). |
 | `--report <s>` | Statistics every `s` seconds (default 60, `0` = off). |
-| `--api <addr>` | Local JSON API: `127.0.0.1:PORT` or `unix:/path`. A non-loopback address needs `--api-token-file`. |
+| `--api <addr>` | Local JSON API and the web page: `127.0.0.1:PORT` or `unix:/path`. A network address (`0.0.0.0:8650`) needs `--api-token` or `--api-token-file`. |
 | `--seed <n>` | Random seed for repeatable runs. |
 | `-d` / `-k` / `-s` | Run in the background (syslog) / stop it / status — as v1. Under systemd use a unit instead. |
 
@@ -123,7 +123,8 @@ int16, uptime as uint32, writable set points.
 
 ## Web page and local JSON API
 
-`--api 127.0.0.1:8650` (or `unix:/run/modbus-slave.sock`; any other address needs `--api-token-file`).
+`--api 127.0.0.1:8650` (or `unix:/run/modbus-slave.sock`; any other address needs a token, see
+[below](#the-page-from-other-computers-token)).
 `http://<host>:8650/` is the web page: **one tile per emulated sensor**. In a tile you pick the template
 (Virtual, KTH2-R, your YAML profiles), the address, **RTU or TCP**, for RTU the port, speed and parity, and the mode:
 **normal** or **crazy** (slow, sometimes no answer, an exception or a broken CRC). Changes apply at once.
@@ -160,6 +161,38 @@ curl -s -X PUT -d '{"transport": "tcp", "listen": ":502"}' localhost:8650/api/v1
 
 The registers `speed_code`, `parity_code`, `baud100` follow the settings of the sensor. The command-line faults
 (`--delay`, `--drop`, ...) are the normal mode of every sensor.
+
+
+### The page from other computers: token
+
+By default the page opens on the same machine only (`127.0.0.1`). To open it from another computer, listen on all
+addresses and give a token; without one the program refuses to start:
+
+```sh
+# Linux
+modbus-slave -p /dev/ttyUSB0 -b 9600 --profile kth2r --units 1-4 --api 0.0.0.0:8650 --api-token 678876
+# Windows
+.\modbus-slave.exe -p COM5 -b 9600 --profile kth2r --units 1-4 --api 0.0.0.0:8650 --api-token 678876
+```
+
+Open `http://<IP of this machine>:8650/`. The page asks for the token once (a field at the top), the browser
+remembers it. For the API, send it as a header: `curl -H 'Authorization: Bearer 678876' http://<IP>:8650/api/v1/status`.
+
+`678876` is only an example: pick your own. There is deliberately no built-in default token: everybody would know it.
+
+**Change the token:** restart with another `--api-token`. The old one stops working in the browser, the page shows
+the token field again, type the new one.
+
+**Token from a file** (`--api-token-file`): the same, but the token is not visible in the process list (`ps`, Task
+Manager); the board package does it this way (`/etc/modbus-slave/api.token`). To change it, write the new token into
+the file and restart:
+
+```sh
+echo 678876 > /etc/modbus-slave/api.token && systemctl restart modbus-slave
+```
+
+On Windows allow port 8650 in the firewall (Windows asks on the first start) or as administrator:
+`netsh advfirewall firewall add rule name="modbus-slave 8650" dir=in action=allow protocol=TCP localport=8650`.
 
 ## Line test
 

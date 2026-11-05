@@ -81,7 +81,7 @@ func Listen(addr, token string) (net.Listener, error) {
 	ip := net.ParseIP(host)
 	loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
 	if !loopback && token == "" {
-		return nil, fmt.Errorf("--api %s is reachable from the network: give --api-token too", addr)
+		return nil, fmt.Errorf("--api %s is reachable from the network: give --api-token or --api-token-file too", addr)
 	}
 	return net.Listen("tcp", addr)
 }

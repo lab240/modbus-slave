@@ -59,6 +59,7 @@ type opts struct {
 	showVersion        bool
 	listProfiles       bool
 	apiAddr, apiToken  string
+	apiTokenValue      string
 }
 
 func main() {
@@ -93,7 +94,8 @@ func main() {
 	fs.Float64Var(&o.report, "report", 60, "statistics interval, s (0 = off)")
 	fs.Uint64Var(&o.seed, "seed", 0, "random seed for repeatable runs (0 = new every start)")
 	fs.StringVar(&o.apiAddr, "api", "", "local JSON API: 127.0.0.1:PORT or unix:/path (off by default)")
-	fs.StringVar(&o.apiToken, "api-token-file", "", "file with a token for the API (Authorization: Bearer); needed for a non-loopback --api")
+	fs.StringVar(&o.apiToken, "api-token-file", "", "file with a token for the API and the page (Authorization: Bearer); needed for a non-loopback --api")
+	fs.StringVar(&o.apiTokenValue, "api-token", "", "the token itself, e.g. --api-token 678876 (like --api-token-file, but seen in the process list)")
 	fs.BoolVar(&o.daemon, "d", false, "run as a background daemon (logs -> syslog); with systemd use the unit instead")
 	fs.BoolVar(&o.kill, "k", false, "stop the running daemon")
 	fs.BoolVar(&o.stat, "s", false, "show daemon status")
@@ -283,7 +285,7 @@ func run(o opts) error {
 		go reporter(ctx, fl.Lines, time.Duration(o.report*float64(time.Second)))
 	}
 	if o.apiAddr != "" {
-		token := ""
+		token := strings.TrimSpace(o.apiTokenValue)
 		if o.apiToken != "" {
 			b, err := os.ReadFile(o.apiToken)
 			if err != nil {
@@ -427,6 +429,10 @@ Examples:
 
   # then open the page in a browser (sensors, ports, registers are changed there):
   %[3]s
+
+  # the page from other computers: listen on all addresses, a token is required then
+  # (the page asks for it once; change it = restart with another token)
+  %[1]s --tcp :1502 --profile kth2r --units 1-4 --api 0.0.0.0:8650 --api-token 678876
 
   # poll it (registers from 1 in mbpoll/modpoll: 769 = T/RH of KTH2-R):
   modpoll -m rtu -b 9600 -p none -a 1 -t 4 -r 769 -c 2 <port of the master>
