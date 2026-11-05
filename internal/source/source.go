@@ -45,6 +45,7 @@ func (r *Random) Describe() string { return "random" }
 // zeros too, so a dead data script shows up at the master instead of frozen values.
 // v2: the file is re-read only when its mtime or size changes; a value may be negative, hex (0x1F) or
 // fractional (45.23, for profiles with a scale); text after the number ("4523 # T x100") is ignored.
+// Files under /proc and /sys are read on every request and never stale.
 type File struct {
 	Path   string
 	MaxAge time.Duration
@@ -67,13 +68,15 @@ func (f *File) Read() (vals []float64, ok bool) {
 		f.warn("file %s: %v", f.Path, err)
 		return nil, false
 	}
-	if f.MaxAge > 0 {
+	// /proc and /sys files (CPU temperature, uptime, load) keep their mtime and size: read them every time
+	pseudo := strings.HasPrefix(f.Path, "/proc/") || strings.HasPrefix(f.Path, "/sys/")
+	if f.MaxAge > 0 && !pseudo {
 		if age := time.Since(st.ModTime()); age > f.MaxAge {
 			f.warn("file %s is stale (%ds > %ds)", f.Path, int(age.Seconds()), int(f.MaxAge.Seconds()))
 			return nil, false
 		}
 	}
-	if f.cache == nil || !st.ModTime().Equal(f.mtime) || st.Size() != f.size {
+	if pseudo || f.cache == nil || !st.ModTime().Equal(f.mtime) || st.Size() != f.size {
 		vals, err := readValues(f.Path)
 		if err != nil {
 			f.warn("file %s: %v", f.Path, err)

@@ -1,0 +1,14 @@
+# ICP DAS DL-303: CO / CO2 / temperature / humidity / dew point logger, as read by
+# lab240/telegraf-grafana-configs conf-telegraf/ICD-DAS/DL-303 (FC 4, UINT16, addresses from 0).
+# The Grafana dashboard there scales T, RH and dew point by 0.01, CO and CO2 are ppm as is.
+# No `input:` map, so FC 4 and FC 3 read the same registers.
+name: dl303
+description: DL-303 ICP DAS CO/CO2/T/RH meter (CO, CO2 ppm; RH, T, dew point x100)
+functions: [3, 4, 6, 16]
+holding:
+  - {addr: 0, name: "CO, ppm x1", wave: {shape: sine, base: 3, amp: 2, period: 300, noise: 0.4}}
+  - {addr: 1, name: "CO2, ppm x1", wave: {shape: sine, base: 650, amp: 150, period: 600, noise: 5}}
+  - {addr: 2, name: "humidity, % x100", wave: {shape: sine, base: 4500, amp: 500, period: 900, phase: 0.5}}
+  - {addr: 3, name: "temperature, °C x100", wave: {shape: sine, base: 2350, amp: 150, period: 900}}
+  - {addr: 4, name: "temperature, °F x100", wave: {shape: sine, base: 7430, amp: 270, period: 900}}
+  - {addr: 5, name: "dew point, °C x100", wave: {shape: sine, base: 1100, amp: 200, period: 900}}

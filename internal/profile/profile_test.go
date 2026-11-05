@@ -178,3 +178,64 @@ func TestParseErrors(t *testing.T) {
 		}
 	}
 }
+
+// The templates made from lab240/telegraf-grafana-configs answer the registers those configs read.
+func TestTelegrafTemplates(t *testing.T) {
+	u16 := func(b []byte, i int) float64 { return float64(binary.BigEndian.Uint16(b[2+2*i:])) }
+	f32 := func(b []byte, i int) float64 {
+		return float64(math.Float32frombits(binary.BigEndian.Uint32(b[2+2*i:])))
+	}
+	cases := []struct {
+		name     string
+		fc       byte
+		addr, n  uint16
+		get      func([]byte, int) float64
+		idx      int
+		min, max float64
+	}{
+		{"dl303", 4, 0, 6, u16, 1, 490, 810},          // CO2 ppm
+		{"dl303", 4, 0, 6, u16, 3, 2190, 2510},        // T x100
+		{"dl303", 4, 0, 6, u16, 5, 890, 1310},         // dew point x100
+		{"pm3112", 4, 4353, 18, f32, 0, 226, 234},     // V_1
+		{"pm3112", 4, 4371, 18, f32, 12, 1300, 1430},  // kWh_2
+		{"pm3112", 4, 4425, 8, f32, 6, 49.9, 50.1},    // Freq_4
+		{"jsy1003f", 3, 72, 10, u16, 0, 22650, 23350}, // V x100
+		{"jsy1003f", 3, 72, 10, u16, 9, 4990, 5010},   // Hz x100
+	}
+	for _, c := range cases {
+		p, err := Load(c.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := Build(p, Env{Unit: 1, Baud: 9600, Parity: 'N'}).Handle(read(c.fc, c.addr, c.n))
+		if len(got) != 2+2*int(c.n) {
+			t.Fatalf("%s FC%d %d+%d: % X", c.name, c.fc, c.addr, c.n, got)
+		}
+		if v := c.get(got, c.idx); v < c.min || v > c.max {
+			t.Errorf("%s reg %d: %v not in %v..%v", c.name, int(c.addr)+c.idx, v, c.min, c.max)
+		}
+	}
+}
+
+// The built-in cpu profile reads /proc directly; /proc files keep their mtime, so each read must re-read them.
+func TestCPUProfile(t *testing.T) {
+	if _, err := os.Stat("/proc/uptime"); err != nil {
+		t.Skip("no /proc")
+	}
+	p, err := Load("cpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Build(p, Env{Unit: 1})
+	up := func() uint32 { return binary.BigEndian.Uint32(d.Handle(read(4, 24, 2))[2:]) }
+	a := up()
+	time.Sleep(1100 * time.Millisecond)
+	if b := up(); a == 0 || b <= a {
+		t.Fatalf("uptime %d -> %d, want growing", a, b)
+	}
+	// the synthetic temperature does not depend on the address: 45 +-5 (+-0.2 noise) at unit 247 too
+	hot := Build(p, Env{Unit: 247}).Handle(read(3, 20, 2))
+	if T := math.Float32frombits(binary.BigEndian.Uint32(hot[2:])); T < 39 || T > 51 {
+		t.Fatalf("CPU temperature %v at unit 247", T)
+	}
+}

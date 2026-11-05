@@ -111,7 +111,13 @@ Per block: `count` (number of values), `type` (`uint16`, `int16`, `uint32`, `int
 register, e.g. a correction the master writes). `input:` is an optional separate map for FC 4; without it
 FC 4 reads the holding map. Unknown keys, overlapping registers and two sources in one block are errors.
 
-Built-in: `kth2r` — KTH2-R T/RH sensor (see `internal/profile/builtin/kth2r.yaml`).
+Built-in (`internal/profile/builtin/`):
+- `kth2r` — KTH2-R T/RH sensor;
+- `dl303` — ICP DAS DL-303 CO/CO2/T/RH meter, `pm3112` — ICP DAS PM-3112 4-channel power meter,
+  `jsy1003f` — JSY1003F energy meter: the registers of the configs in
+  [lab240/telegraf-grafana-configs](https://github.com/lab240/telegraf-grafana-configs);
+- `cpu` — the board itself: synthetic CPU temperature, real load average and uptime from `/proc`.
+Files under `/proc` and `/sys` are re-read on every request.
 Example: [`examples/soft-sensor.yaml`](examples/soft-sensor.yaml) — CPU temperature from a file as float32 and
 int16, uptime as uint32, writable set points.
 

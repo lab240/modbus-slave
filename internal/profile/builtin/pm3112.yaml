@@ -1,0 +1,50 @@
+# ICP DAS PM-3112: 1-phase power meter, 4 channels, as read by lab240/telegraf-grafana-configs
+# conf-telegraf/ICD-DAS/PM3112 (FC 4; FLOAT32-IEEE, ABCD = high word first; addresses from 0).
+# No `input:` map, so FC 4 and FC 3 read the same registers. Channels differ by the wave phase.
+name: pm3112
+description: PM-3112 ICP DAS 4-channel power meter (V, I, kW, kvar, kVA, PF, kWh, kvarh, kVAh, Hz as float32)
+functions: [3, 4, 6, 16]
+holding:
+  - {addr: 512, name: "wiring type", value: 0}
+  - {addr: 515, name: "model name", value: 0x3112}
+  - {addr: 516, name: "mode type", value: 0}
+  - {addr: 4353, name: "V_1, V x1", type: float32, wave: {shape: sine, base: 230, amp: 3, period: 600, phase: 0.0}}
+  - {addr: 4355, name: "I_1, A x1", type: float32, wave: {shape: sine, base: 5, amp: 2, period: 300, phase: 0.0}}
+  - {addr: 4357, name: "kW_1, kW x1", type: float32, wave: {shape: sine, base: 1.1, amp: 0.4, period: 300, phase: 0.0}}
+  - {addr: 4359, name: "kvar_1, kvar x1", type: float32, wave: {shape: sine, base: 0.3, amp: 0.1, period: 300, phase: 0.0}}
+  - {addr: 4361, name: "kVA_1, kVA x1", type: float32, wave: {shape: sine, base: 1.2, amp: 0.4, period: 300, phase: 0.0}}
+  - {addr: 4363, name: "PF_1", type: float32, wave: {shape: sine, base: 0.92, amp: 0.03, period: 300, phase: 0.0}}
+  - {addr: 4365, name: "kWh_1, kWh x1", type: float32, wave: {shape: saw, base: 1250.0, amp: 50, period: 3600, phase: 0.0}}
+  - {addr: 4367, name: "kvarh_1, kvarh x1", type: float32, wave: {shape: saw, base: 300.0, amp: 10, period: 3600, phase: 0.0}}
+  - {addr: 4369, name: "kVAh_1, kVAh x1", type: float32, wave: {shape: saw, base: 1400.0, amp: 50, period: 3600, phase: 0.0}}
+  - {addr: 4425, name: "Freq_1, Hz x1", type: float32, wave: {shape: sine, base: 50, amp: 0.05, period: 120, phase: 0.0, noise: 0.01}}
+  - {addr: 4371, name: "V_2, V x1", type: float32, wave: {shape: sine, base: 230, amp: 3, period: 600, phase: 0.25}}
+  - {addr: 4373, name: "I_2, A x1", type: float32, wave: {shape: sine, base: 5, amp: 2, period: 300, phase: 0.25}}
+  - {addr: 4375, name: "kW_2, kW x1", type: float32, wave: {shape: sine, base: 1.1, amp: 0.4, period: 300, phase: 0.25}}
+  - {addr: 4377, name: "kvar_2, kvar x1", type: float32, wave: {shape: sine, base: 0.3, amp: 0.1, period: 300, phase: 0.25}}
+  - {addr: 4379, name: "kVA_2, kVA x1", type: float32, wave: {shape: sine, base: 1.2, amp: 0.4, period: 300, phase: 0.25}}
+  - {addr: 4381, name: "PF_2", type: float32, wave: {shape: sine, base: 0.92, amp: 0.03, period: 300, phase: 0.25}}
+  - {addr: 4383, name: "kWh_2, kWh x1", type: float32, wave: {shape: saw, base: 1375.0, amp: 50, period: 3600, phase: 0.25}}
+  - {addr: 4385, name: "kvarh_2, kvarh x1", type: float32, wave: {shape: saw, base: 330.0, amp: 10, period: 3600, phase: 0.25}}
+  - {addr: 4387, name: "kVAh_2, kVAh x1", type: float32, wave: {shape: saw, base: 1540.0, amp: 50, period: 3600, phase: 0.25}}
+  - {addr: 4427, name: "Freq_2, Hz x1", type: float32, wave: {shape: sine, base: 50, amp: 0.05, period: 120, phase: 0.25, noise: 0.01}}
+  - {addr: 4389, name: "V_3, V x1", type: float32, wave: {shape: sine, base: 230, amp: 3, period: 600, phase: 0.5}}
+  - {addr: 4391, name: "I_3, A x1", type: float32, wave: {shape: sine, base: 5, amp: 2, period: 300, phase: 0.5}}
+  - {addr: 4393, name: "kW_3, kW x1", type: float32, wave: {shape: sine, base: 1.1, amp: 0.4, period: 300, phase: 0.5}}
+  - {addr: 4395, name: "kvar_3, kvar x1", type: float32, wave: {shape: sine, base: 0.3, amp: 0.1, period: 300, phase: 0.5}}
+  - {addr: 4397, name: "kVA_3, kVA x1", type: float32, wave: {shape: sine, base: 1.2, amp: 0.4, period: 300, phase: 0.5}}
+  - {addr: 4399, name: "PF_3", type: float32, wave: {shape: sine, base: 0.92, amp: 0.03, period: 300, phase: 0.5}}
+  - {addr: 4401, name: "kWh_3, kWh x1", type: float32, wave: {shape: saw, base: 1500.0, amp: 50, period: 3600, phase: 0.5}}
+  - {addr: 4403, name: "kvarh_3, kvarh x1", type: float32, wave: {shape: saw, base: 360.0, amp: 10, period: 3600, phase: 0.5}}
+  - {addr: 4405, name: "kVAh_3, kVAh x1", type: float32, wave: {shape: saw, base: 1680.0, amp: 50, period: 3600, phase: 0.5}}
+  - {addr: 4429, name: "Freq_3, Hz x1", type: float32, wave: {shape: sine, base: 50, amp: 0.05, period: 120, phase: 0.5, noise: 0.01}}
+  - {addr: 4407, name: "V_4, V x1", type: float32, wave: {shape: sine, base: 230, amp: 3, period: 600, phase: 0.75}}
+  - {addr: 4409, name: "I_4, A x1", type: float32, wave: {shape: sine, base: 5, amp: 2, period: 300, phase: 0.75}}
+  - {addr: 4411, name: "kW_4, kW x1", type: float32, wave: {shape: sine, base: 1.1, amp: 0.4, period: 300, phase: 0.75}}
+  - {addr: 4413, name: "kvar_4, kvar x1", type: float32, wave: {shape: sine, base: 0.3, amp: 0.1, period: 300, phase: 0.75}}
+  - {addr: 4415, name: "kVA_4, kVA x1", type: float32, wave: {shape: sine, base: 1.2, amp: 0.4, period: 300, phase: 0.75}}
+  - {addr: 4417, name: "PF_4", type: float32, wave: {shape: sine, base: 0.92, amp: 0.03, period: 300, phase: 0.75}}
+  - {addr: 4419, name: "kWh_4, kWh x1", type: float32, wave: {shape: saw, base: 1625.0, amp: 50, period: 3600, phase: 0.75}}
+  - {addr: 4421, name: "kvarh_4, kvarh x1", type: float32, wave: {shape: saw, base: 390.0, amp: 10, period: 3600, phase: 0.75}}
+  - {addr: 4423, name: "kVAh_4, kVAh x1", type: float32, wave: {shape: saw, base: 1820.0, amp: 50, period: 3600, phase: 0.75}}
+  - {addr: 4431, name: "Freq_4, Hz x1", type: float32, wave: {shape: sine, base: 50, amp: 0.05, period: 120, phase: 0.75, noise: 0.01}}

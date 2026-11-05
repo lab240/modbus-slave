@@ -1,0 +1,14 @@
+# The board as a sensor: a synthetic CPU temperature (many boards have no thermal zone, and an emulator
+# should always give a living value), the real load average and uptime straight from /proc, no scripts.
+# For the real temperature from a file or /sys see examples/soft-sensor.yaml.
+name: cpu
+description: CPU temperature (synthetic), load average and uptime of this board (float32 °C, load x100, uint32 s)
+functions: [3, 4]
+holding:
+  - {addr: 0, name: "name", string: "NAPI CPU"}
+  - {addr: 10, name: "Modbus address", special: unit}
+  - {addr: 20, name: "CPU temperature, °C x1", type: float32,          # 45 +-5 °C, period 5 min
+     wave: {shape: sine, base: 45, amp: 5, period: 300, noise: 0.2}}
+  - {addr: 22, name: "load average 1 min, x100", scale: 100, file: /proc/loadavg}
+  - {addr: 23, name: "reserved", value: 0}
+  - {addr: 24, name: "uptime, s x1", type: uint32, file: /proc/uptime}

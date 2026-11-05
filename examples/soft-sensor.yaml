@@ -1,8 +1,9 @@
 # A soft sensor: real values from files written by scripts, everything else const.
 #   modbus-slave -p /dev/ttyS7 -b 9600 --profile examples/soft-sensor.yaml --units 1
-#   scripts/cpu_temp_to_modbus.sh writes /tmp/cpu.dat (°C x100, one value per line)
+#   scripts/cpu_temp_to_modbus.sh /tmp/cpu.dat writes it (°C x100, one value per line)
+# Without scripts: the built-in profile "cpu" reads /sys and /proc directly.
 name: soft-sensor
-description: CPU temperature and uptime from files, as float32 and uint32
+description: Soft sensor - CPU temperature and uptime from files written by scripts, as float32 and uint32
 functions: [3, 4]
 holding:
   - {addr: 0, string: "NAPI SOFT"}                         # 0..4: device name

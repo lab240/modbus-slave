@@ -117,7 +117,13 @@ printf "4523\n1013\n" > /tmp/s1.tmp && mv /tmp/s1.tmp /tmp/s1.dat
 `input:` — необязательная отдельная карта для FC 4; если её нет, FC 4 читает карту holding. Ошибкой считаются
 неизвестные ключи, пересекающиеся регистры и два источника в одном блоке.
 
-Встроенный профиль: `kth2r` — датчик температуры и влажности KTH2-R (`internal/profile/builtin/kth2r.yaml`).
+Встроенные профили (`internal/profile/builtin/`):
+- `kth2r` — датчик температуры и влажности KTH2-R;
+- `dl303` — ICP DAS DL-303 (CO/CO2/T/RH), `pm3112` — 4-канальный счётчик ICP DAS PM-3112,
+  `jsy1003f` — счётчик JSY1003F: регистры как в конфигах
+  [lab240/telegraf-grafana-configs](https://github.com/lab240/telegraf-grafana-configs);
+- `cpu` — сама плата: синтетическая температура CPU, настоящие загрузка и аптайм из `/proc`.
+Файлы из `/proc` и `/sys` перечитываются при каждом запросе.
 Пример: [`examples/soft-sensor.yaml`](examples/soft-sensor.yaml) — температура CPU из файла как float32 и
 int16, время работы как uint32, уставки, которые пишет мастер.
 

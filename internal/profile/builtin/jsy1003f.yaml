@@ -1,0 +1,16 @@
+# JSY1003F 1-phase energy meter (NAPI-FCU-JSY), as read by lab240/telegraf-grafana-configs
+# conf-telegraf/NAPI-FCU-JSY (FC 3, UINT16, addresses from 0). The divisors are the z_multiplier_*
+# fields of its Starlark processor: V /100, I /1000, W /10, Hz /100, PF /1000, energy /3200.
+# Energy: 75 high word, 76 low word (telegraf reads them as energy and energy1).
+name: jsy1003f
+description: JSY1003F energy meter (V x100, A x1000, W x10, energy x3200, PF x1000, Hz x100)
+functions: [3, 4, 6, 16]
+holding:
+  - {addr: 3, name: "current range", value: 0}
+  - {addr: 72, name: "voltage, V x100", wave: {shape: sine, base: 23000, amp: 300, period: 600, noise: 20}}
+  - {addr: 73, name: "current, A x1000", wave: {shape: sine, base: 4500, amp: 1500, period: 300}}
+  - {addr: 74, name: "power, W x10", wave: {shape: sine, base: 10000, amp: 3000, period: 300}}
+  - {addr: 75, name: "energy, Wh x3200", type: uint32, wave: {shape: saw, base: 3200000, amp: 32000, period: 3600}}
+  - {addr: 77, name: "power factor, x1000", wave: {shape: sine, base: 950, amp: 30, period: 300}}
+  - {addr: 78, name: "reserved", count: 3, value: 0}
+  - {addr: 81, name: "frequency, Hz x100", wave: {shape: sine, base: 5000, amp: 5, period: 120, noise: 2}}
