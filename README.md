@@ -14,8 +14,8 @@ One static binary, no dependencies. v2 is a rewrite in Go of the C version (v1, 
 the v1 command line keeps working.
 
 > Status: **v2 is in development** (branch `v2`). Linux is tested (also on real FT4232H lines); the Windows
-> build (`COM3`, Win32 API) compiles but has **not been tried on Windows yet** — the v1 `.exe` stays in `bin/`
-> until it has. On Windows: ports are `COM<n>`; no `--pty` (use a com0com pair), no FT4232H channel numbers,
+> build (`COM3`, Win32 API) is **checked on Windows 11** (two FT232R, RTU against modpoll, raw `line-test`, the web page
+> with its COM port list); the v1 `.exe` is still in `bin/`. On Windows: ports are `COM<n>`; no `--pty` (use a com0com pair), no FT4232H channel numbers,
 > no `-d/-k/-s`; the FTDI latency is set in the driver (Device Manager → port → Advanced).
 
 ## Build

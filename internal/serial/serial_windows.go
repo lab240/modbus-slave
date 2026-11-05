@@ -2,11 +2,14 @@ package serial
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 // Windows: COM ports through the Win32 API (non-overlapped I/O). Wait does a ReadFile with a timeout
@@ -147,5 +150,31 @@ func OpenPty(link string) (Conn, error) {
 	return nil, fmt.Errorf("--pty is not available on Windows; use a virtual COM pair (com0com)")
 }
 
-// List is not implemented on Windows yet: the port is typed (COM3).
-func List() []PortInfo { return nil }
+// List: the COM ports Windows has now, from HKLM\HARDWARE\DEVICEMAP\SERIALCOMM
+// (value name = driver device, e.g. \Device\VCP0 for FTDI; data = COM3).
+func List() []PortInfo {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `HARDWARE\DEVICEMAP\SERIALCOMM`, registry.QUERY_VALUE)
+	if err != nil {
+		return nil
+	}
+	defer k.Close()
+	names, err := k.ReadValueNames(0)
+	if err != nil {
+		return nil
+	}
+	var out []PortInfo
+	for _, n := range names {
+		com, _, err := k.GetStringValue(n)
+		if err != nil || com == "" {
+			continue
+		}
+		out = append(out, PortInfo{Path: com, Dev: com, Info: strings.TrimPrefix(n, `\Device\`)})
+	}
+	sort.Slice(out, func(i, j int) bool { return comNum(out[i].Path) < comNum(out[j].Path) })
+	return out
+}
+
+func comNum(s string) int {
+	n, _ := strconv.Atoi(strings.TrimPrefix(strings.ToUpper(s), "COM"))
+	return n
+}

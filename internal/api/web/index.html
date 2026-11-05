@@ -102,6 +102,8 @@ td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
 .edit button { padding: 2px 8px; font-size: 12px; }
 .more { color: var(--accent); cursor: pointer; font-size: 12px; background: none; border: none; padding: 0; }
 .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.hint.try { margin: 0 0 10px; line-height: 1.7; }
+.hint.try code { overflow-wrap: anywhere; }
 code { background: var(--soft); padding: 1px 5px; border-radius: 4px; }
 details.card > summary { cursor: pointer; font-weight: 600; font-size: 15px; }
 details.card[open] > summary { margin-bottom: 12px; }
@@ -147,7 +149,7 @@ const T = {
   port: ['Port', 'Порт'], baud: ['Speed', 'Скорость'], baudFmt: ['Speed', 'Скорость'], format: ['Parity', 'Чётность'], tcpPort: ['TCP port', 'TCP-порт'],
   mode: ['Mode', 'Режим'], normal: ['Normal', 'Нормальный'], crazy: ['Crazy', 'Психованный'], normalS: ['Normal', 'Норма'], crazyS: ['Crazy', 'Псих'],
   add: ['+ Add a sensor', '+ Добавить датчик'], remove: ['Remove', 'Удалить'], registers: ['Registers', 'Регистры'],
-  confirmRemove: ['Remove sensor', 'Удалить датчик'], other: ['other…', 'другой…'],
+  confirmRemove: ['Remove sensor', 'Удалить датчик'], other: ['other…', 'другой…'], noPorts: ['no serial ports found', 'последовательные порты не найдены'],
   waiting: ['open, waiting for the master', 'открыт, ждёт запросов мастера'], polled: ['polled', 'опрашивается'],
   openLast: ['open, last request', 'открыт, последний запрос'], served: ['requests', 'запросов'],
   ago: ['s ago', 'с назад'], notOpen: ['not open', 'не открыт'], noPort: ['no port', 'нет порта'], pickPort: ['adapter unplugged or moved — pick a port', 'адаптер отключён или переткнут — выберите порт'], starting: ['starting…', 'запуск…'],
@@ -159,7 +161,7 @@ const T = {
   funcs: ['Functions', 'Функции'], fc3: ['read holding', 'чтение holding'], fc4: ['read input', 'чтение input'],
   fc6: ['write one', 'запись одного'], fc8: ['diagnostics', 'диагностика'], fc16: ['write several', 'запись нескольких'],
   fc4same: ['FC 4 reads the same map as FC 3.', 'FC 4 читает ту же карту, что и FC 3.'],
-  zeroBased: ['Addresses from 0 (as in napiconfig); mbpoll counts from 1.', 'Адреса с нуля (как в napiconfig); в mbpoll на 1 больше.'],
+  zeroBased: ['addresses in the table are from 0, as in napiconfig; mbpoll and modpoll count from 1', 'адреса в таблице с нуля, как в napiconfig; в mbpoll и modpoll на 1 больше'],
   howto: ['Try', 'Проверка'], masterPort: ['&lt;port of the master&gt;', '&lt;порт мастера&gt;'],
   more: ['More settings', 'Дополнительно'],
   crazyTitle: ['What the crazy mode does', 'Что делает психованный режим'],
@@ -411,7 +413,7 @@ function wire(el, id) {
     const f = i.dataset.f;
     let v = i.value;
     if (v === '__other') {
-      v = prompt(f === 'port' ? '/dev/ttyUSB0' : t('baud'), '');
+      v = prompt(f === 'port' ? (/^COM/i.test((S.ports[0] || {}).path || '') ? 'COM3' : '/dev/ttyUSB0') : t('baud'), '');
       if (!v) { renderTiles(); return; }
     }
     if (f === 'unit' || f === 'baud') v = parseInt(v, 10);
@@ -419,7 +421,14 @@ function wire(el, id) {
     update(id, {[f]: v});
   });
   el.querySelectorAll('[data-f="unit"], [data-f="listen"]').forEach(i => i.onkeydown = e => { if (e.key === 'Enter') i.blur(); });
-  el.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => update(id, {transport: b.dataset.tr}));
+  el.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => {
+    const s = S.sensors.find(x => x.id === id) || {};
+    if (b.dataset.tr === 'rtu' && s.transport !== 'rtu' && !s.port) {   // a TCP sensor has no port yet: take one
+      const p = pickPort();
+      if (!p) { toast(t('noPorts'), true); return; }
+      update(id, {transport: 'rtu', port: p.path, baud: s.baud || 9600, mode: s.mode || '8N1'});
+    } else update(id, {transport: b.dataset.tr});
+  });
   el.querySelectorAll('[data-cr]').forEach(b => b.onchange = () => update(id, {crazy: b.value === '1'}));
   el.querySelector('[data-act="del"]').onclick = () => removeSensor(id);
   el.querySelector('[data-act="toggle"]').onclick = () => update(id, {stopped: !S.sensors.find(x => x.id === id)?.stopped});
@@ -438,6 +447,9 @@ async function update(id, body) {
   await refresh();
 }
 
+// a port for a new RTU sensor: a USB adapter first (Linux ttyUSB/ACM, Windows FTDI VCP), else the first one
+function pickPort() { return S.ports.find(p => /USB|ACM/.test(p.dev) || /VCP|USB/i.test(p.info || '')) || S.ports[0]; }
+
 async function addSensor() {
   const last = S.sensors[S.sensors.length - 1];
   let body;
@@ -446,7 +458,7 @@ async function addSensor() {
     const unit = Math.min(247, Math.max(...same.map(s => s.unit)) + 1);
     body = {profile: 'generic', unit, transport: last.transport, port: last.port, baud: last.baud, mode: last.mode, listen: last.listen};
   } else {
-    const p = S.ports.find(p => /USB|ACM/.test(p.dev)) || S.ports[0];
+    const p = pickPort();
     body = p ? {profile: 'generic', unit: 1, transport: 'rtu', port: p.path, baud: 9600, mode: '8N1'} : {profile: 'generic', unit: 1, transport: 'tcp', listen: ':502'};
   }
   try { const r = await api('/sensors', {method: 'POST', body: JSON.stringify(body)}); toast(t('applied')); await refresh(); selectSensor(r.id); }
@@ -489,13 +501,21 @@ async function renderRegs() {
   const hasFC4 = m.input && m.input.length;
   const funcs = m.functions.map(f => `<code>${String(f).padStart(2, '0')}</code> ${t('fc' + f)}`).join(' · ');
   const tmpl = S.templates.find(x => x.name === s.profile);
-  const t0 = m.holding.find(isMeasure) || m.holding[0];
-  const try0 = s.transport === 'tcp'
-    ? `mbpoll -m tcp -p ${esc(s.listen.split(':').pop())} -a ${s.unit} -r ${t0.addr + 1} -c ${Math.min(t0.regs, 2)} -1 ${esc(location.hostname)}`
-    : `mbpoll -m rtu -b ${s.baud} -d ${s.mode[0]} -P ${({N: 'none', E: 'even', O: 'odd'})[s.mode[1]]} -s ${s.mode[2]} -a ${s.unit} -r ${t0.addr + 1} -c ${Math.min(t0.regs, 2)} -1 ${t('masterPort')}`;
+  const tb = fc === 4 && hasFC4 ? m.input : m.holding;
+  const t0 = tb.find(isMeasure) || tb[0];
+  const reg = t0.addr + 1, cnt = Math.min(t0.regs, 2);
+  const par = {N: 'none', E: 'even', O: 'odd'}[s.mode[1]];
+  const tcpPort = s.transport === 'tcp' ? esc(s.listen.split(':').pop()) : '';
+  const host = esc(location.hostname), mport = t('masterPort');
+  const tries = s.transport === 'tcp'
+    ? [`mbpoll -m tcp -p ${tcpPort} -a ${s.unit} -t ${fc === 4 ? 3 : 4} -r ${reg} -c ${cnt} -1 ${host}`,
+       `modpoll -m tcp -p ${tcpPort} -a ${s.unit} -t ${fc === 4 ? 3 : 4} -r ${reg} -c ${cnt} -1 ${host}`]
+    : [`mbpoll -m rtu -b ${s.baud} -d ${s.mode[0]} -P ${par} -s ${s.mode[2]} -a ${s.unit} -t ${fc === 4 ? 3 : 4} -r ${reg} -c ${cnt} -1 ${mport}`,
+       `modpoll -m rtu -b ${s.baud} -d ${s.mode[0]} -p ${par} -s ${s.mode[2]} -a ${s.unit} -t ${fc === 4 ? 3 : 4} -r ${reg} -c ${cnt} -1 ${mport}`];
   const html = `<h3>${t('regsOf')} ${s.id} · ${esc(tmplTitle(s.profile))} · ${t('address')} ${s.unit}
       ${hasFC4 ? ` <span class="seg" style="display:inline-grid;vertical-align:middle"><button data-fc="3" class="${fc === 3 ? 'sel' : ''}">FC 3</button><button data-fc="4" class="${fc === 4 ? 'sel' : ''}">FC 4</button></span>` : ''}</h3>
     <p class="desc">${esc(tmpl ? tmpl.description : m.description)}<br>${t('funcs')}: ${funcs}</p>
+    <div class="hint try">${t('howto')} (${t('zeroBased')})<br>${tries.map(x => `<code>${x}</code>`).join('<br>')}</div>
     <div class="tablewrap"><table><thead><tr><th>${t('addr')}</th><th>${t('name')}</th><th>${t('value')}</th><th>${t('raw')}</th></tr></thead><tbody>
     ${rows.map(({b, key, n, vals, err}) => {
       const range = b.regs > 1 ? '–' + hex(b.addr + b.regs - 1) : '';
@@ -508,8 +528,7 @@ async function renderRegs() {
         <td class="val">${value}${more}${edit}</td>
         <td class="raw mono">${err ? '' : vals.map(v => hex(v)).join(' ')}</td></tr>`;
     }).join('')}</tbody></table></div>
-    ${hasFC4 ? '' : `<div class="hint">${t('fc4same')}</div>`}
-    <div class="hint">${t('zeroBased')} ${t('howto')}: <code>${try0}</code></div>`;
+    ${hasFC4 ? '' : `<div class="hint">${t('fc4same')}</div>`}`;
   if (html === renderRegs.last) return;
   renderRegs.last = html;
   const box = $('regs');
