@@ -18,6 +18,9 @@ the v1 command line keeps working.
 > with its COM port list). On Windows: ports are `COM<n>`; no `--pty` (use a com0com pair), no FT4232H channel numbers,
 > no `-d/-k/-s`; the FTDI latency is set in the driver (Device Manager → port → Advanced).
 
+**Windows:** a step-by-step guide for users (in Russian): [WINDOWS-RU.md](WINDOWS-RU.md); the `.exe` is in
+[Releases](https://github.com/lab240/modbus-slave/releases/latest).
+
 ## Build
 
 ```sh
