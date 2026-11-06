@@ -10,12 +10,12 @@
   any script keeps up to date (I2C, 1-Wire, sysfs, CPU temperature, time...);
 - **check a line**: a pty mode for tests without hardware, statistics per line.
 
-One static binary, no dependencies. v2 is a rewrite in Go of the C version (v1, still in `src/`);
+One static binary, no dependencies. v2 is a rewrite in Go of the C version (v1, now in the [`v1`](https://github.com/lab240/modbus-slave/tree/v1) branch);
 the v1 command line keeps working.
 
-> Status: **v2 is in development** (branch `v2`). Linux is tested (also on real FT4232H lines); the Windows
+> Status: **v2** (branch `main`). Linux is tested (also on real FT4232H lines); the Windows
 > build (`COM3`, Win32 API) is **checked on Windows 11** (two FT232R, RTU against modpoll, raw `line-test`, the web page
-> with its COM port list); the v1 `.exe` is still in `bin/`. On Windows: ports are `COM<n>`; no `--pty` (use a com0com pair), no FT4232H channel numbers,
+> with its COM port list). On Windows: ports are `COM<n>`; no `--pty` (use a com0com pair), no FT4232H channel numbers,
 > no `-d/-k/-s`; the FTDI latency is set in the driver (Device Manager → port → Advanced).
 
 ## Build
@@ -243,7 +243,7 @@ journalctl -u modbus-slave -f
 
 ## v1 (C)
 
-The C version is in `src/` and its binaries in `bin/` (Linux x86_64, aarch64, Windows x64). The v2 command line
+The C version and its binaries (Linux x86_64, aarch64, Windows x64) are in the [`v1`](https://github.com/lab240/modbus-slave/tree/v1) branch. The v2 command line
 accepts the v1 options (`-p -b -a -o -f -t -d -k -s`); a v1 device = `--profile generic` (the default):
 20 holding registers, FC 3 (v2 also answers FC 4 on the same map), random or from a file.
 
