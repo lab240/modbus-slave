@@ -19,6 +19,7 @@
 //	                                           {"enabled": true} = systemctl enable (start with the system)
 //	GET    /api/v1/crazy                       the faults of the crazy mode
 //	PUT    /api/v1/crazy                       change them: {"delay_ms": 20, "jitter_ms": 400, "drop": 0.1, ...}
+//	POST   /api/v1/bye                         the page is closed (the program in a window stops; else nothing)
 package api
 
 import (
@@ -58,6 +59,10 @@ type API struct {
 	token string
 	start time.Time
 	unit  string // our systemd unit, "" when not run by systemd
+
+	// Seen is called on every request with the right token, Bye when the page is closed
+	// (POST /api/v1/bye): the program in a window stops with its window. Nil: nothing.
+	Seen, Bye func()
 }
 
 func New(info Info, f *fleet.Fleet, genericRegs int, token string) *API {
@@ -110,6 +115,12 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/crazy", a.putCrazy)
 	mux.HandleFunc("GET /api/v1/service", a.getService)
 	mux.HandleFunc("PUT /api/v1/service", a.putService)
+	mux.HandleFunc("POST /api/v1/bye", func(w http.ResponseWriter, r *http.Request) {
+		if a.Bye != nil {
+			a.Bye()
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/index.html") {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -123,6 +134,9 @@ func (a *API) Handler() http.Handler {
 				fail(w, http.StatusUnauthorized, "missing or wrong token (Authorization: Bearer ...)")
 				return
 			}
+		}
+		if a.Seen != nil {
+			a.Seen()
 		}
 		mux.ServeHTTP(w, r)
 	})

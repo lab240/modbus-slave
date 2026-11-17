@@ -28,10 +28,14 @@ import (
 	"github.com/lab240/modbus-slave/internal/server"
 )
 
-var version = "2.0.1-dev"
+var version = "2.0.2-dev"
 
-// afterAPI runs once the page is up (the double-click start opens its window then).
-var afterAPI = func() {}
+// afterAPI runs once the page is up (the start with no arguments opens its window then); onAPI
+// gets the API before it serves (the window's hooks).
+var (
+	afterAPI = func() {}
+	onAPI    = func(*api.API) {}
+)
 
 type multi []string
 
@@ -306,6 +310,7 @@ func run(o opts) error {
 			return err
 		}
 		a := api.New(api.Info{Version: version}, fl, o.regs, token)
+		onAPI(a)
 		go a.Serve(ln)
 		go func() { <-ctx.Done(); ln.Close() }()
 		log.Printf("api and web page on %s", o.apiAddr)

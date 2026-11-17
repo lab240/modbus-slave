@@ -27,6 +27,7 @@ header { align-items: center; }
 .svc .btn:disabled { opacity: .45; cursor: default; border-color: var(--line); }
 .svc .auto { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
 .tile.off .ctl, .tile.off .vals { opacity: .55; }
+.tile.noport .values .v, .tile.noport .values .v small { color: var(--muted); font-weight: 400; }
 .icon.play { color: var(--ok); } .icon.pause { color: var(--muted); }
 main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; flex: none; }
@@ -398,6 +399,7 @@ function renderTiles() {
     n.el.classList.toggle('sel', S.sel === s.id);
     n.el.classList.toggle('crazy', !!s.crazy);
     n.el.classList.toggle('off', !!s.stopped || !S.running);
+    n.el.classList.toggle('noport', s.transport === 'rtu' && !s.port && !s.pty);   // answers nowhere: grey values
     const html = controls(s);
     const focused = n.el.contains(document.activeElement) && document.activeElement.tagName !== 'BUTTON';
     if (html !== n.ctlHtml && !focused) {   // re-render only when changed: an open drop-down stays open
@@ -647,6 +649,9 @@ async function loop() {
   setTimeout(loop, S.sensors.length > 30 ? 3000 : S.sensors.length > 10 ? 2000 : 1000);
 }
 boot().then(() => setTimeout(loop, 1000));
+// the program in a window stops with it: bye when closed, a sign of life while hidden
+addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/v1/bye'); } catch (e) {} });
+setInterval(() => { if (document.hidden) api('/status').catch(() => {}); }, 20000);
 </script>
 </body>
 </html>

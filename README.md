@@ -22,6 +22,9 @@ the v1 command line keeps working.
 [Releases](https://github.com/lab240/modbus-slave/releases/latest). A double click opens the program in a window of
 its own (three sensors with random registers on Modbus TCP :1502); closing the window stops the emulator.
 
+**Linux with a desktop:** a start with no arguments opens the same window (Chrome/Chromium in app mode, else the
+default browser); the settings are in `~/.config/modbus-slave`; closing the window stops the emulator.
+
 ## Build
 
 ```sh
