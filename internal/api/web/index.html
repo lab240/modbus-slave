@@ -152,7 +152,7 @@ const T = {
   confirmRemove: ['Remove sensor', 'Удалить датчик'], other: ['other…', 'другой…'], noPorts: ['no serial ports found', 'последовательные порты не найдены'],
   waiting: ['open, waiting for the master', 'открыт, ждёт запросов мастера'], polled: ['polled', 'опрашивается'],
   openLast: ['open, last request', 'открыт, последний запрос'], served: ['requests', 'запросов'],
-  ago: ['s ago', 'с назад'], notOpen: ['not open', 'не открыт'], noPort: ['no port', 'нет порта'], pickPort: ['adapter unplugged or moved — pick a port', 'адаптер отключён или переткнут — выберите порт'], starting: ['starting…', 'запуск…'],
+  ago: ['s ago', 'с назад'], notOpen: ['not open', 'не открыт'], noPort: ['no port', 'нет порта'], noPortYet: ['RTU: no port (no adapter connected)', 'RTU: нет порта (адаптер не подключён)'], pickPort: ['adapter unplugged or moved — pick a port', 'адаптер отключён или переткнут — выберите порт'], starting: ['starting…', 'запуск…'],
   fN: ['none · 8N1', 'нет · 8N1'], fE: ['even · 8E1', 'чёт · 8E1'], fO: ['odd · 8O1', 'нечёт · 8O1'],
   fN2: ['none, 2 stop · 8N2', 'нет, 2 стопа · 8N2'], f7E: ['7 bits even · 7E1', '7 бит, чёт · 7E1'], f7O: ['7 bits odd · 7O1', '7 бит, нечёт · 7O1'],
   regsOf: ['Registers of sensor', 'Регистры датчика'], addr: ['Address', 'Адрес'], name: ['Name', 'Название'],
@@ -314,7 +314,7 @@ function controls(s) {
   const tcp = s.transport === 'tcp';
   const tmpl = S.templates.map(x => `<option value="${esc(x.name)}"${x.name === s.profile ? ' selected' : ''}>${esc(x.name === 'generic' ? t('virtual') : x.title)}</option>`).join('');
   const known = portKnown(s.port);
-  const ports = S.ports.map(p => `<option value="${esc(p.path)}"${p.path === s.port || p.dev === s.port ? ' selected' : ''}>${esc(portLabel(p.path))}</option>`).join('') +
+  const ports = (s.port ? '' : `<option value="" selected>${t('noPort')}</option>`) + S.ports.map(p => `<option value="${esc(p.path)}"${p.path === s.port || p.dev === s.port ? ' selected' : ''}>${esc(portLabel(p.path))}</option>`).join('') +
     (known || !s.port ? '' : `<option value="${esc(s.port)}" selected title="${esc(s.port)}">⚠ ${t('noPort')}</option>`) + `<option value="__other">${t('other')}</option>`;
   const bauds = BAUDS.map(b => `<option${b === s.baud ? ' selected' : ''}>${b}</option>`).join('') +
     (BAUDS.includes(s.baud) ? '' : `<option selected>${s.baud}</option>`) + `<option value="__other">${t('other')}</option>`;
@@ -341,6 +341,7 @@ function controls(s) {
 function stateLine(s) {
   if (s.stopped) return `<div class="state"><span class="dot"></span>${t('stoppedOne')}</div>`;
   if (!S.running) return `<div class="state"><span class="dot"></span>${t('stoppedByAll')}</div>`;
+  if (s.transport === 'rtu' && !s.port && !s.pty) return `<div class="state"><span class="dot"></span>${t('noPortYet')}</div>`;
   const l = s.live;
   if (!l) return `<div class="state"><span class="dot"></span>${t('starting')}</div>`;
   if (!l.open && s.transport !== 'tcp' && s.port && !portKnown(s.port))
@@ -423,10 +424,9 @@ function wire(el, id) {
   el.querySelectorAll('[data-f="unit"], [data-f="listen"]').forEach(i => i.onkeydown = e => { if (e.key === 'Enter') i.blur(); });
   el.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => {
     const s = S.sensors.find(x => x.id === id) || {};
-    if (b.dataset.tr === 'rtu' && s.transport !== 'rtu' && !s.port) {   // a TCP sensor has no port yet: take one
+    if (b.dataset.tr === 'rtu' && s.transport !== 'rtu' && !s.port) {   // a TCP sensor has no port yet: take one, or none
       const p = pickPort();
-      if (!p) { toast(t('noPorts'), true); return; }
-      update(id, {transport: 'rtu', port: p.path, baud: s.baud || 9600, mode: s.mode || '8N1'});
+      update(id, {transport: 'rtu', port: p ? p.path : '', baud: s.baud || 9600, mode: s.mode || '8N1'});
     } else update(id, {transport: b.dataset.tr});
   });
   el.querySelectorAll('[data-cr]').forEach(b => b.onchange = () => update(id, {crazy: b.value === '1'}));

@@ -19,7 +19,8 @@ the v1 command line keeps working.
 > no `-d/-k/-s`; the FTDI latency is set in the driver (Device Manager → port → Advanced).
 
 **Windows:** a step-by-step guide for users (in Russian): [WINDOWS-RU.md](WINDOWS-RU.md); the `.exe` is in
-[Releases](https://github.com/lab240/modbus-slave/releases/latest).
+[Releases](https://github.com/lab240/modbus-slave/releases/latest). A double click opens the program in a window of
+its own (three sensors with random registers on Modbus TCP :1502); closing the window stops the emulator.
 
 ## Build
 

@@ -20,7 +20,8 @@
 > задержку FTDI настраивают в драйвере (Диспетчер устройств → порт → Дополнительно).
 
 **Windows:** пошаговая инструкция для пользователя — [WINDOWS-RU.md](WINDOWS-RU.md) (скачать `.exe` из
-[Releases](https://github.com/lab240/modbus-slave/releases/latest), запустить, открыть страницу).
+[Releases](https://github.com/lab240/modbus-slave/releases/latest) и запустить двойным щелчком: откроется окно программы
+с тремя датчиками; закрыли окно — эмулятор остановился).
 
 ## Сборка
 

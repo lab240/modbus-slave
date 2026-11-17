@@ -28,7 +28,10 @@ import (
 	"github.com/lab240/modbus-slave/internal/server"
 )
 
-var version = "2.0.0-dev"
+var version = "2.0.1-dev"
+
+// afterAPI runs once the page is up (the double-click start opens its window then).
+var afterAPI = func() {}
 
 type multi []string
 
@@ -120,6 +123,7 @@ func main() {
 	if o.kill || o.stat {
 		os.Exit(daemonControl(o.kill))
 	}
+	app := appMode(&o)
 	if len(o.ports) == 0 && len(o.ptys) == 0 && len(o.tcps) == 0 {
 		fs.Usage()
 		pauseIfOwnConsole()
@@ -130,6 +134,10 @@ func main() {
 	}
 	if o.seed == 0 {
 		o.seed = uint64(time.Now().UnixNano())
+	}
+	if app {
+		appRun(o)
+		return
 	}
 	cleanup := daemonChild()
 	err := run(o)
@@ -301,6 +309,7 @@ func run(o opts) error {
 		go a.Serve(ln)
 		go func() { <-ctx.Done(); ln.Close() }()
 		log.Printf("api and web page on %s", o.apiAddr)
+		afterAPI()
 	}
 	<-ctx.Done()
 	fl.Wait()
@@ -318,6 +327,9 @@ func cmp(a, b string) string {
 func settingsOf(s fleet.Sensor) string {
 	if s.Transport == "tcp" {
 		return "Modbus TCP " + s.Listen
+	}
+	if s.Port == "" && !s.Pty {
+		return "RTU, no port"
 	}
 	return fmt.Sprintf("RTU %s %d %s", s.Port, s.Baud, s.Mode)
 }

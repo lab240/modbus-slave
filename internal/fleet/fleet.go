@@ -52,6 +52,9 @@ func (s *Sensor) settings() server.Settings {
 	return server.Settings{Transport: s.Transport, Port: s.Port, Baud: s.Baud, Mode: s.Mode, Listen: s.Listen, Pty: s.Pty}
 }
 
+// noPort: RTU with no port chosen (no adapter yet): no line, the sensor waits.
+func (s *Sensor) noPort() bool { return s.Transport == "rtu" && s.Port == "" && !s.Pty }
+
 // key is the endpoint: sensors with the same key share a line.
 func (s *Sensor) key() string {
 	if s.Transport == "tcp" {
@@ -75,7 +78,11 @@ func (s *Sensor) normalize() error {
 	if s.Listen == "" {
 		s.Listen = ":502"
 	}
+	s.Port = strings.TrimSpace(s.Port)
 	st := s.settings()
+	if s.noPort() {
+		st.Port = "-" // RTU with no port is fine for a sensor: it waits, no line is opened
+	}
 	if err := st.Check(); err != nil {
 		return err
 	}
@@ -247,7 +254,7 @@ func (f *Fleet) apply() {
 	var keys []string
 	for _, id := range f.order {
 		s := f.rt[id].cfg.Load()
-		if s.Stopped || f.stopped {
+		if s.Stopped || f.stopped || s.noPort() {
 			continue
 		}
 		k := s.key()
@@ -470,7 +477,11 @@ func describe(s Sensor) string {
 	if s.Stopped {
 		m += ", stopped"
 	}
-	return fmt.Sprintf("%s, address %d, %s, %s", s.Profile, s.Unit, s.settings(), m)
+	where := s.settings().String()
+	if s.noPort() {
+		where = "Modbus RTU, no port"
+	}
+	return fmt.Sprintf("%s, address %d, %s, %s", s.Profile, s.Unit, where, m)
 }
 
 // List is the sensors in order. An address the master changed over Modbus is taken over.
@@ -548,6 +559,11 @@ func (f *Fleet) LiveOf() map[int]Live {
 				lv.Where = rl.set.Where()
 			}
 			out[id] = lv
+		}
+	}
+	for id, r := range f.rt {
+		if s := r.cfg.Load(); s.noPort() && !s.Stopped && !f.stopped {
+			out[id] = Live{Error: "no port", LastAgoS: -1, Unit: s.Unit, Line: -1}
 		}
 	}
 	return out
