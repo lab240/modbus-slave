@@ -364,7 +364,8 @@ async function liveValues(s) {
       const vals = decodeVals(b, got[b.addr]);
       if (s.profile === 'generic') return vals.map((v, i) => `<div><div class="v">${v}</div><div class="l">R${i}</div></div>`).join('');
       const ms = measure(b);
-      const v = vals.length === 1 && ms.div > 1 ? (vals[0] / ms.div).toFixed(String(ms.div).length - 1) : vals.join(', ');
+      const v = vals.length === 1 && ms.div > 1 ? (vals[0] / ms.div).toFixed(String(ms.div).length - 1)
+        : vals.map(x => Number.isInteger(x) ? x : x.toFixed(2)).join(', ');   // a tile: 2 decimals (the table keeps all)
       return `<div><div class="v">${esc(v)}<small>${esc(ms.unit)}</small></div><div class="l">${esc(ms.label)}</div></div>`;
     });
     return `<div class="values">${parts.join('')}</div>`;

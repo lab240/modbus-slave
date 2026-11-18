@@ -28,7 +28,7 @@ import (
 	"github.com/lab240/modbus-slave/internal/server"
 )
 
-var version = "2.0.2-dev"
+var version = "2.0.3-dev"
 
 // afterAPI runs once the page is up (the start with no arguments opens its window then); onAPI
 // gets the API before it serves (the window's hooks).
